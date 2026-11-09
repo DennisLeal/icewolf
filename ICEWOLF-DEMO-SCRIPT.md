@@ -1,219 +1,237 @@
-# Icewolf 0.2.0: installation and demonstration script
+# Icewolf v0.2.0: installation and presentation script
 
-This is a recording guide for Dennis. **Show** describes screen actions;
-**Say** is narration; **Ask Icewolf** is a request to speak or type in the app.
-Wait for each response; the model's answers and processing time will vary.
-Use only a build that includes the project-links command and Gmail scope update.
+Hi, I'm Dennis, also known as Papsi, and I'm an AI enthusiast. I built
+Icewolf because I was curious about what it would take to make an AI
+assistant that I could talk to on my own computer. So, in this video, I'll
+show you what Icewolf can do, explain how I built it, and walk you through
+what you need and how you can install it on your own Windows PC. I'll also
+show you how you can explore the code and start making the assistant your own.
 
-## 1. Prepare the recording
+The idea is to have a local-first voice assistant that can listen, respond,
+and speak using models running on my computer, without a paid cloud AI
+subscription. Icewolf is still an early project, so I'll be clear about what
+works today and what it can't do yet.
 
-**Before recording:**
+Before we install anything, let's talk about the bare essentials. You'll
+need a Windows PC compatible with 64-bit x64 software, a microphone, and
+speakers or headphones. You'll also need enough free storage and memory for
+Icewolf and the models you choose, and an internet connection for the
+initial downloads. Icewolf doesn't have a verified minimum RAM or storage
+requirement yet; smaller models are a good starting point, but speed and
+whether a model fits in memory depend on your PC. A dedicated GPU isn't
+required for Icewolf's speech recognition or voice synthesis, though your
+local language model's performance will depend on your hardware.
 
-1. Close private windows and disable sensitive notifications. Icewolf's
-   conversation can display names, email subjects, previews and local paths.
-2. Connect a microphone and speakers. Choose your Windows default devices.
-3. Keep a non-sensitive sample document ready for the agent walkthrough.
-4. Have internet available for initial setup, Gmail and GitHub. Core speech and
-   model processing can run offline once the required files are installed.
-5. Do not display your Google client JSON, authorization screen, email content
-   or personal study materials during the recording.
+## Step-by-step installation
 
-**Say:** "Hi, I'm Dennis. Today I'll show you how I install Icewolf and how I
-use it as a local-first AI voice assistant on my Windows PC. We'll also look at
-the features that are still in development."
+This recording uses the published Windows installer. The optional source route
+below explains how to download a local speech-recognition model and run Icewolf
+from the repository.
 
-## 2. Install and launch Icewolf
+### Install from the published Windows pre-release
 
-**Show:**
+1. Open the [Icewolf v0.2.0 pre-release](https://github.com/DennisLeal/icewolf/releases/tag/v0.2.0).
+   Under **Assets**, download **Icewolf-Setup.exe**. The package is unsigned, so
+   Windows may show a publisher warning. Verify the source before continuing.
+2. Run the installer, follow its steps, choose whether to add a desktop
+   shortcut, and launch Icewolf from the Start menu or desktop.
+3. Install [Ollama for Windows](https://ollama.com/download/windows) and start
+   it. In PowerShell, check for a local model:
 
-1. Locate `Icewolf-Setup.exe`. On the development PC the installer is in the
-   project's `dist` folder. This locally built installer is not automatically
-   available as a GitHub Release.
-2. Close any running Icewolf session and run the installer. The package is
-   unsigned, so Windows may show a publisher warning; verify the source
-   before deciding whether to continue.
-3. Follow the installer wizard. Choose the optional desktop shortcut and,
-   on the original development PC, optionally copy existing project settings
-   and agent data. Migration never overwrites existing destination files.
-4. Open Icewolf from the Start menu or desktop shortcut.
-5. Start Ollama and make sure a local language model is installed. Icewolf
-   does not install Ollama or its language models. Open **Configuration**,
-   choose the Ollama model and select a local Faster-Whisper model folder if
-   the cached `base.en` folder is not already selected.
-6. If needed, use the setup instructions in the README to install Ollama and
-   download a local model and Whisper model once. The installer includes the
-   Kokoro voice files but not an Ollama or Whisper model.
+~~~~powershell
+ollama list
+~~~~
 
-**Say:** "Icewolf installs for my Windows user. I also need Ollama and a local
-language model, plus a local Whisper model for speech recognition. The
-installer includes the Kokoro voice. After setup, the core voice pipeline can
-operate offline; Gmail and GitHub are optional online exceptions."
+4. If the list does not include a local model, download the example model once,
+   then check the list again:
 
-**Say:** "The installer keeps user data separately from the program, and the
-optional migration doesn't delete the original files. The app does not start
-the microphone automatically."
+~~~~powershell
+ollama pull llama3.2:3b
+ollama list
+~~~~
 
-## 3. Introduce the dashboard and architecture
+5. Icewolf also needs a local Faster-Whisper model directory containing
+   **model.bin**, **config.json**, and **tokenizer.json**. The installer does
+   not include this model. If you already have a compatible local model, keep
+   its folder path ready. Otherwise, use the optional source setup below to
+   download one.
+6. In Icewolf, open **Configuration**. Select your installed Ollama model,
+   choose the Whisper model folder with **Browse folder**, and set **Typed
+   conversation language** to **English** for voice and integrations. Return
+   to **Conversation**, select **Start listening**, and wait for the status
+   before saying **"Hey Icewolf."**
 
-**Show:** Point to Conversation, Voice view, Configuration, the animated
-center, status and the system resource indicators.
+### Optional source setup and model download
 
-**Say:** "The dashboard shows conversation, assistant status and local system
-information. The animated core reflects listening and speaking levels. I can
-also reduce its motion in Configuration."
+1. Install Python 3.12 and [Git for Windows](https://git-scm.com/download/win).
+   Icewolf supports Python 3.10 through 3.12; these commands use 3.12.
+2. Open PowerShell and clone the repository:
 
-**Say:** "Icewolf is built in Python with PyQt. Silero detects speech,
-Faster-Whisper transcribes it, Ollama runs the local language model, and
-Kokoro turns the reply into speech. These steps take time, so local doesn't
-mean zero latency."
+~~~~powershell
+Set-Location (Join-Path $env:USERPROFILE 'Documents')
+git clone https://github.com/DennisLeal/icewolf.git
+Set-Location .\icewolf
+~~~~
 
-## 4. Wake Icewolf and continue a conversation
+3. Create a virtual environment and install the desktop requirements:
 
-**Show:**
+~~~~powershell
+py -3.12 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install --upgrade pip
+.\.venv\Scripts\python.exe -m pip install -r requirements-gui.txt
+~~~~
 
-1. Select English under **Typed conversation language**, then close
-   Configuration.
-2. Select **Start listening** and wait for **Wake listening — say Hey
-   Icewolf**.
-3. **Ask Icewolf:** "Hey Icewolf."
-4. Wait for the greeting and **Conversation listening — speak now**.
-5. **Ask Icewolf:** "Suggest an easy snack."
-6. After the answer and listening status return, **ask:** "What could I drink
-   with that?"
+4. Download the English speech-recognition model into the project folder:
 
-**Say:** "I wake Icewolf once per session, then ask follow-up questions without
-repeating the wake phrase. The microphone closes while it processes or speaks,
-so I can't interrupt it mid-reply."
+~~~~powershell
+.\.venv\Scripts\python.exe -c "from huggingface_hub import snapshot_download; snapshot_download('Systran/faster-whisper-base.en', local_dir='models/faster-whisper-base.en')"
+$env:ICEWOLF_WHISPER_MODEL = (Resolve-Path .\models\faster-whisper-base.en).Path
+~~~~
 
-**Show:** Stop listening. Open **Configuration** and point to **Wait after you
-stop speaking**.
+5. The source desktop setup also needs the local Kokoro voice files. Download
+   them once:
 
-**Say:** "A longer pause gives me more time to think without being interrupted;
-a shorter pause makes responses start sooner but can cut off a longer pause."
+~~~~powershell
+New-Item -ItemType Directory -Force .\models\kokoro | Out-Null
+$kokoroBase = 'https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.1'
+curl.exe --fail --location --output .\models\kokoro\kokoro-v1.0.onnx "$kokoroBase/kokoro-v1.0.onnx"
+curl.exe --fail --location --output .\models\kokoro\voices-v1.0.bin "$kokoroBase/voices-v1.0.bin"
+~~~~
 
-## 5. Show the project links
+6. Keep Ollama running, then launch the source desktop app:
 
-**Show:** Return to Conversation and start a voice session as above, or type
-the command with English selected.
+~~~~powershell
+.\.venv\Scripts\python.exe -m icewolf.desktop
+~~~~
 
-**Say:** "Icewolf will display the repository links in its Conversation
-window. The Jarvis project inspired the visual direction; Icewolf is its own
-local-first implementation."
+In Configuration, select the local Ollama model, set **Whisper model folder**
+to **models\faster-whisper-base.en**, and choose English. The published
+installer already includes Kokoro files; source setup downloads them separately.
+For the complete setup details, use the README in the Icewolf repository.
 
-**Ask Icewolf:** "Show project links."
+The initial setup needs an internet connection to download the software and
+models. After that, the core voice pipeline and a locally configured language
+model can run on your computer without a subscription. Local doesn't mean
+instant, though: recognition, generating an answer, and creating speech all
+take processing time. Gmail and GitHub lookups are optional features that
+still need internet access.
 
-**Show:** The Conversation displays both:
+Icewolf is built in Python, with a desktop interface made using PyQt. When I
+speak, speech activity detection helps identify when I'm talking.
+Faster-Whisper turns my voice into text, Ollama runs the language model
+locally, and Kokoro generates the spoken response. The dashboard brings those
+pieces together, showing the conversation, the current assistant status, and
+information about CPU and memory usage. If NVIDIA's monitoring tool is
+available, it can also show GPU information.
 
+Now let me show you a conversation. Opening Icewolf doesn't automatically
+turn on the microphone, so I'll select Start listening and wait for the
+wake-listening status. Then I'll say, "Hey Icewolf."
+
+After Icewolf greets me and shows that it's listening, I can ask, "Suggest an
+easy snack." Once he finishes answering and starts listening again, I can
+follow up with, "What could I drink with that?"
+
+I only need to say the wake phrase once for this listening session. Icewolf
+continues listening for follow-up requests after each reply until I stop the
+session. When I am done, I select **Stop listening**.
+I can also type a message in Conversation and select **Send**.
+**Clear** clears the visible transcript and resets the current in-memory chat history. The microphone closes while he's transcribing, thinking, or
+speaking, so he can't hear an interruption during that time. In Configuration,
+I can also change how long he waits after I stop speaking. A longer wait gives
+me more time to pause, while a shorter wait can feel faster but may interrupt
+me if I haven't finished my thought.
+
+Icewolf's interface includes the main Conversation view and a focused Voice
+view with a larger animated core. The core responds to microphone and speech
+levels, and I can reduce its motion in Configuration. There's also an
+avatar-only mode: I can move the small avatar around the desktop, start or
+stop listening from it, and return to the full interface with Open HUD. The
+avatar stays behind ordinary windows, and the system tray can help me restore
+it when available. It isn't a permanent desktop icon, and Windows Show
+desktop may minimize it.
+
+I also want to show you the projects behind this demonstration. Icewolf will
+display the repository links in his Conversation window. I'll open Conversation, select **Start listening** if needed, say **"Hey Icewolf"**, and then ask him:
+"Show project links."
+
+The Conversation window should now show both links:
 - Icewolf: https://github.com/DennisLeal/icewolf
-- Original Jarvis inspiration: https://github.com/ethanplusai/jarvis
+- Original Jarvis project: https://github.com/ethanplusai/jarvis
 
-**Say:** "Displaying these links does not contact GitHub. I can visit them
-later or use the separate GitHub repository feature."
+Icewolf is its own local-first implementation. Displaying these links happens
+locally; it doesn't contact GitHub.
 
-If voice recognition misses the command, type **show project links** instead.
-This command requires English; it displays links, not a repository analysis.
+Another feature I'm excited about is the ability to create a specialist
+advisor. I'll open the agent creation wizard, change the prefilled name to
+"Marketing Specialist," and describe the kind of marketing advice I want.
+Then I'll choose study materials, such as a PDF with selectable text, a Word
+document, a text file, or a Markdown file, and save the agent. It's attached
+for this session; after restarting Icewolf, I can attach it again from the
+Agent roles list. Later, I can add or manage its materials.
 
-## 6. Voice view, avatar and tray
+For example, after adding a marketing guide, I can ask,
+"Ask Marketing Specialist agent to explain our target audience." Icewolf
+looks for relevant passages in the documents I've added and provides them to
+the local model. When it finds useful material, the conversation can show the
+source names and PDF page numbers.
 
-**Show:** Open **Voice view**, then return to **Conversation**. Choose
-**Avatar-only mode**, drag the avatar, and choose **Open HUD**.
+It's important to understand what that means: adding documents does not
+retrain the language model. This is a document-backed reference assistant,
+and its answers and citations can still be wrong, so I need to check the
+source. It can't log into marketing accounts or make changes. The extracted document
+text is stored locally without encryption, so I should only add material I'm
+allowed to keep on this PC and avoid secrets. Icewolf also has Research,
+Coding, and Marketing advisor roles, but those roles offer advice rather than
+independently browsing or executing code. For the demo, I can attach Research, ask a question, then point out Coding and Marketing in the Agent roles list.
 
-**Say:** "The focused Voice view and compact avatar control the same session.
-The avatar sits behind ordinary windows. I can restore the HUD from the
-avatar or, if available, the Windows system tray. Show desktop may minimize
-the avatar too."
+Icewolf can also help me look at a public GitHub repository. I can select the
+GitHub repo button, paste a public repository link, add a question, and ask
+Icewolf to check it. This feature goes online to read public repository
+information and an excerpt of its README. It does not inspect the project's
+source code, run tests, or verify its security, so I should check the original
+repository for myself.
 
-## 7. Create a specialist advisor
+There's an optional Gmail connection as well. After setting up a Google OAuth
+desktop client and enabling the Gmail API, I can use Connect or reconnect
+Gmail in Configuration and review the permission request in my browser. The
+credential is stored in Windows Credential Manager. For privacy, I won't show
+my sign-in details, client file, or private messages in this recording.
 
-**Show:**
+Once connected, I can ask, "Check my Gmail." Icewolf can report up to the
+five latest inbox messages, displaying senders, subjects, and short previews
+while speaking shortened sender names and subjects. The current authorization
+requests Gmail modify access, which is broader than reading, but the
+application itself only implements inbox reports today. It cannot yet send
+or draft messages, change labels or read status, delete messages, or monitor
+the inbox automatically. Gmail access requires an internet connection.
 
-1. Select **Create agent**. Show the prefilled NICE IEX Administrator name and
-   responsibilities; explain they can be changed.
-2. Select **Select study materials**, choose a safe sample PDF with selectable
-   text, Word document, UTF-8 text file, or Markdown file, and select **Save**.
-3. In **Agent roles**, select and attach the agent if it is not already attached.
-4. Ask a question matching the sample, such as **"Ask NICE IEX Administrator
-   agent to explain forecast settings."** Show the source citations when present.
-5. Point to **Add study materials** and **Manage study materials** for updates.
+For typed conversations, Icewolf also offers experimental Tagalog, Cebuano,
+and Hiligaynon options alongside English. I can stop listening, open
+Configuration, choose a typed conversation language, and type a message.
+These options ask the local model to respond in the selected language, so
+quality depends on the model and Hiligaynon may be unreliable. They do not
+currently provide spoken responses or speech recognition in those languages.
+I'll switch back to English to use voice and the conversation integrations.
 
-**Say:** "This creates a local document-backed advisor, not a trained model.
-Icewolf looks up matching passages and sends those excerpts to the local model.
-It can make mistakes, so I check the sources. The agent cannot log into NICE
-IEX or make changes. Extracted material is stored locally without encryption."
+If you want to make Icewolf your own, you can already choose a different
+local Ollama model, adjust the speech pause, reduce avatar motion, and create
+your own document-backed advisor in the interface. Renaming the assistant or
+changing the wake phrase isn't a setting yet. To do that, you'll need the
+source code. The README explains where the assistant's prompts, greeting,
+wake phrase, and display labels are defined, and how to run and rebuild a
+modified copy. Changing the name on the screen alone won't change the phrase
+the microphone listens for, so it's important to update the related code and
+test it with your own microphone.
 
-**Say:** "The built-in Research, Coding and Marketing roles provide advice,
-not independent browsing, code execution or autonomous actions."
+So that's Icewolf version 0.2.0: a local-first voice assistant with an
+interactive Windows dashboard, a compact avatar, ongoing voice conversation,
+document-backed advisors, and optional Gmail and public GitHub features.
+It's a work in progress, and features such as autonomous document creation
+and sending email haven't been implemented yet.
 
-## 8. Explore a public GitHub repository
-
-**Show:** Select **GitHub repo**, paste one of the public URLs above and add
-an optional question. Select **Check repository** and wait for the result.
-Skip this step if GitHub is unavailable.
-
-**Say:** "This separate feature contacts GitHub online and reads public
-repository metadata and a README excerpt. It does not inspect the source
-code, and its answer should be checked against the original."
-
-## 9. Gmail: what it does and does not do
-
-**Show:** With private email hidden, point to **Connect or reconnect Gmail**
-in Configuration. Do not record the Google login or credential file.
-
-**Say:** "Gmail is optional and uses the internet. This build requests Gmail
-modify permission, but the only implemented email feature is an inbox report:
-it can display recent senders, subjects and previews, and speak shortened
-sender names and subjects. It cannot yet send, draft, delete, label, or change
-messages, even though the permission is broader."
-
-**Say:** "To connect, I select the Google OAuth desktop-client JSON, review
-the Google consent screen and authorize the requested scope. If an older
-connection needs updated permission, I use Connect or reconnect Gmail again."
-
-**Optional, only with safe data:** Ask **"Check my Gmail"** and show the
-report. Otherwise skip the live inbox to protect privacy.
-
-## 10. Experimental typed languages
-
-**Show:** Stop listening. In **Configuration**, select Tagalog, Cebuano or
-Hiligaynon under **Typed conversation language**; type a short greeting in
-Conversation and wait for the reply. Restore English afterwards.
-
-**Say:** "These languages are experimental for typed conversation only.
-Quality depends on the local model and Hiligaynon may be unreliable. Voice,
-agent commands and conversation integrations currently require English."
-
-## 11. Personalize Icewolf
-
-**Show:**
-
-1. Open **Configuration** and show how to choose an installed Ollama model,
-   select a Whisper folder, adjust the speech pause and change the typed
-   conversation language. Show **Reduce avatar motion** if desired.
-2. Show the **Create agent** wizard to demonstrate choosing a different role
-   and adding your own authorized study materials.
-
-**Say:** "Some options can be changed directly in Icewolf. You can pick your
-local model, change how long it waits after you speak, adjust avatar motion,
-or create your own document-backed advisor."
-
-**Say:** "Changing the assistant's name or wake phrase is not a setting yet.
-To do that, you need a copy of the source code, Python, the project
-dependencies and a rebuilt application. Changing only the words on screen
-doesn't change what the microphone listens for."
-
-**Show:** Open your local source folder in an editor and point to the
-**Customizing the assistant** section of the README.
-
-**Say:** "The README identifies where the assistant's prompt, greeting, wake
-phrase and display labels are defined, plus how to run and rebuild your
-modified copy. Keep backups, avoid sharing your settings or credentials, and
-test the new wake phrase before relying on it."
-
-## 12. Closing and next steps
-
-**Show:** Return to Conversation, select English, and stop listening.
-
-**Say:** "That's Icewolf 0.2.0: a local-first voice assistant, dashboard,
-avatar and document-based advisor, with optional online integrations.
-Autonomous document creation and sending email are not implemented yet.
-Thanks for watching."
+Thanks for watching. You can find the source, setup instructions, and
+pre-release on the [Icewolf GitHub
+repository](https://github.com/DennisLeal/icewolf), and the original visual
+inspiration at the [Jarvis
+repository](https://github.com/ethanplusai/jarvis).

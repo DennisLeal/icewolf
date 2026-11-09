@@ -17,12 +17,22 @@ offline. Models use disk space and inference takes time: local does not mean
 zero latency. Voice quality and speed depend on your PC and installed voice.
 Gmail and public GitHub repository lookups are optional online integrations.
 
+## Project repositories
+
+- Icewolf source repository: [github.com/DennisLeal/icewolf](https://github.com/DennisLeal/icewolf)
+- Jarvis project referenced for inspiration: [github.com/ethanplusai/jarvis](https://github.com/ethanplusai/jarvis)
+
+In an English desktop conversation, say or type "show project links" to display
+both URLs in the Conversation window. This local command does not contact GitHub.
+The public GitHub README lookup is a separate online feature.
+
 ### What's in 0.2.0
 
 - Per-user Windows installer, dashboard, Voice view, and desktop avatar mode.
 - Local wake phrase, continuous conversation, offline speech and local Ollama.
 - Local document-backed advisor agents, including the NICE IEX wizard.
 - Optional Gmail inbox reports and public GitHub README overviews.
+- Show the Icewolf and Jarvis project links directly in the Conversation window.
 - Experimental typed replies in Tagalog, Cebuano and Hiligaynon. Voice remains
   English-only, and model quality varies by language.
 
@@ -61,6 +71,20 @@ though its Gmail authorization requests the broader `gmail.modify` scope.
 
 ## Setup on Windows
 
+### Get the source
+
+The v0.2.0 repository provides source code; a locally built installer is not
+automatically a GitHub Release. Install Git for Windows, then clone the project
+into your Documents folder:
+
+~~~~powershell
+Set-Location (Join-Path $env:USERPROFILE 'Documents')
+git clone https://github.com/DennisLeal/icewolf.git
+Set-Location .\icewolf
+~~~~
+
+Continue with the setup commands below from the cloned project folder.
+
 Prerequisites: Python 3.10-3.12, an audio input/output device, Ollama with a
 **local** model, and a complete local CTranslate2 faster-whisper model directory.
 The first setup downloads free software or models if you do not already have
@@ -89,7 +113,7 @@ and `tokenizer.json`. For example, if it is not already cached, with internet
 access you can download it to the ignored `models` directory:
 
 ```powershell
-.\.venv\Scripts\python.exe -c "from huggingface_hub import snapshot_download; snapshot_download('Systran/faster-whisper-base.en', local_dir='models\faster-whisper-base.en')"
+.\.venv\Scripts\python.exe -c "from huggingface_hub import snapshot_download; snapshot_download('Systran/faster-whisper-base.en', local_dir='models/faster-whisper-base.en')"
 $env:ICEWOLF_WHISPER_MODEL = (Resolve-Path .\models\faster-whisper-base.en).Path
 ```
 
@@ -267,6 +291,9 @@ the configured local model available. Opening Icewolf does not automatically
 enable the microphone.
 
 ### Windows installer
+
+The published v0.2.0 Windows pre-release is available at [GitHub Releases](https://github.com/DennisLeal/icewolf/releases/tag/v0.2.0);
+download the **Icewolf-Setup.exe** asset from its **Assets** list.
 
 The per-user installer is built as `dist\Icewolf-Setup.exe`. Close any running
 Icewolf instance before installing. The installer places the application in
