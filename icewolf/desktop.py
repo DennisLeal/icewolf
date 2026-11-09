@@ -11,11 +11,11 @@ import threading
 
 import psutil
 from PyQt6.QtCore import QDateTime, QPointF, QProcess, QRectF, QSettings, Qt, QThread, QTimer, pyqtSignal
-from PyQt6.QtGui import QColor, QFont, QPainter, QPen, QPolygonF, QRadialGradient
+from PyQt6.QtGui import QColor, QFont, QIcon, QPainter, QPen, QPixmap, QPolygonF, QRadialGradient
 from PyQt6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog, QFrame,
     QHBoxLayout, QLabel, QLineEdit, QListWidget, QMessageBox, QDoubleSpinBox, QMainWindow,
-    QPlainTextEdit, QPushButton, QStackedWidget, QVBoxLayout, QWidget,
+    QMenu, QPlainTextEdit, QPushButton, QStackedWidget, QSystemTrayIcon, QVBoxLayout, QWidget,
 )
 
 from .agents import AgentStore, BUILTIN_ROLES
@@ -181,6 +181,77 @@ class CoreDisplay(QWidget):
         painter.setPen(QColor("#5bdcf7"))
         painter.drawText(QRectF(0, center.y() + radius * 1.17, width, 22),
                          Qt.AlignmentFlag.AlignCenter, self.state)
+
+
+class AvatarWindow(QWidget):
+    """Compact desktop window; it shares the main window's voice session."""
+
+    def __init__(self, owner):
+        super().__init__(None, Qt.WindowType.Window | Qt.WindowType.FramelessWindowHint |
+                         Qt.WindowType.WindowStaysOnBottomHint)
+        self.owner = owner
+        self.drag_offset = None
+        self.placed = False
+        self.setWindowTitle("Icewolf avatar")
+        self.setAccessibleName("Icewolf avatar")
+        self.setFixedSize(220, 220)
+        self.setStyleSheet(STYLE)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setSpacing(2)
+        self.core = CoreDisplay()
+        self.core.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self.core.setToolTip("Drag to move Icewolf on your desktop.")
+        layout.addWidget(self.core, 1)
+        buttons = QHBoxLayout()
+        self.listen_button = QPushButton("Start listening")
+        self.listen_button.setAccessibleName("Start or stop the voice session")
+        self.listen_button.clicked.connect(owner.toggle_wake)
+        buttons.addWidget(self.listen_button)
+        self.hud_button = QPushButton("Open HUD")
+        self.hud_button.clicked.connect(owner.restore_hud)
+        buttons.addWidget(self.hud_button)
+        layout.addLayout(buttons)
+        self.setToolTip("Drag the avatar to move it. Use Open HUD to return to Icewolf.")
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.drag_offset = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+            event.accept()
+        else:
+            super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if self.drag_offset is not None and event.buttons() & Qt.MouseButton.LeftButton:
+            self.move(event.globalPosition().toPoint() - self.drag_offset)
+            event.accept()
+        else:
+            super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        self.drag_offset = None
+        super().mouseReleaseEvent(event)
+
+    def closeEvent(self, event):
+        event.ignore()
+        self.owner.restore_hud()
+
+
+def create_tray_icon() -> QIcon:
+    pixmap = QPixmap(32, 32)
+    pixmap.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    painter.setBrush(QColor("#0c2938"))
+    painter.setPen(QPen(QColor("#71e9ee"), 2))
+    painter.drawEllipse(2, 2, 27, 27)
+    painter.setPen(QPen(QColor("#b2f6ff"), 2))
+    painter.drawPolyline(QPolygonF([
+        QPointF(7, 17), QPointF(11, 17), QPointF(14, 10),
+        QPointF(18, 22), QPointF(21, 15), QPointF(25, 15),
+    ]))
+    painter.end()
+    return QIcon(pixmap)
 
 
 class AssistantWorker(QThread):
@@ -476,9 +547,11 @@ class IcewolfWindow(QMainWindow):
         self.nav_conversation.setObjectName("navActive")
         self.nav_voice = QPushButton("Voice view")
         self.nav_settings = QPushButton("Configuration")
+        self.avatar_button = QPushButton("Avatar-only mode")
         side.addWidget(self.nav_conversation)
         side.addWidget(self.nav_voice)
         side.addWidget(self.nav_settings)
+        side.addWidget(self.avatar_button)
         side.addSpacing(12)
         section = QLabel("AGENT ROLES")
         section.setObjectName("section")
@@ -750,6 +823,22 @@ class IcewolfWindow(QMainWindow):
         self.nav_voice.clicked.connect(self.show_voice)
         layout.addWidget(self.views, 1)
         self.setStyleSheet(STYLE)
+        self.avatar_window = AvatarWindow(self)
+        self.avatar_window.core.set_reduced_motion(self.reduce_motion.isChecked())
+        self.avatar_window.core.set_state(self.core.state)
+        self.avatar_button.clicked.connect(self.show_avatar)
+        self.tray = None
+        if QSystemTrayIcon.isSystemTrayAvailable():
+            self.tray = QSystemTrayIcon(create_tray_icon(), self)
+            self.tray.setToolTip("Icewolf — open HUD")
+            menu = QMenu(self)
+            menu.addAction("Open HUD", self.restore_hud)
+            menu.addAction("Show avatar", self.show_avatar)
+            menu.addSeparator()
+            menu.addAction("Exit Icewolf", self.close)
+            self.tray.setContextMenu(menu)
+            self.tray.activated.connect(self.tray_activated)
+            self.tray.show()
         if self.agent_load_error:
             QTimer.singleShot(0, lambda: self.show_error(
                 f"Could not load local agents: {self.agent_load_error}"
@@ -784,7 +873,36 @@ class IcewolfWindow(QMainWindow):
     def set_reduced_motion(self, reduced: bool):
         self.core.set_reduced_motion(reduced)
         self.voice_core.set_reduced_motion(reduced)
+        self.avatar_window.core.set_reduced_motion(reduced)
         self.settings.setValue("reduce_motion", reduced)
+
+    def show_avatar(self):
+        if self.closing:
+            return
+        self.settings_dialog.hide()
+        if not self.avatar_window.placed:
+            screen = self.screen() or QApplication.primaryScreen()
+            if screen is not None:
+                area = screen.availableGeometry()
+                self.avatar_window.move(area.right() - self.avatar_window.width() - 15,
+                                        area.bottom() - self.avatar_window.height() - 15)
+            self.avatar_window.placed = True
+        self.avatar_window.showNormal()
+        self.avatar_window.lower()
+        self.hide()
+
+    def restore_hud(self):
+        if self.closing:
+            return
+        self.avatar_window.hide()
+        self.showNormal()
+        self.raise_()
+        self.activateWindow()
+
+    def tray_activated(self, reason):
+        if reason in (QSystemTrayIcon.ActivationReason.Trigger,
+                      QSystemTrayIcon.ActivationReason.DoubleClick):
+            self.restore_hud()
 
     def show_conversation(self):
         self.views.setCurrentIndex(0)
@@ -805,6 +923,7 @@ class IcewolfWindow(QMainWindow):
     def set_audio_level(self, value: float):
         self.core.set_level(value)
         self.voice_core.set_level(value)
+        self.avatar_window.core.set_level(value)
 
     def models_loaded(self, exit_code, exit_status):
         if exit_code != 0 or exit_status != QProcess.ExitStatus.NormalExit:
@@ -883,6 +1002,10 @@ class IcewolfWindow(QMainWindow):
             label.style().polish(label)
         self.core.set_state(state)
         self.voice_core.set_state(state)
+        self.avatar_window.core.set_state(state)
+        self.avatar_window.setToolTip(text)
+        if self.tray is not None:
+            self.tray.setToolTip(f"Icewolf — {text}")
 
     def browse_model(self):
         path = QFileDialog.getExistingDirectory(self, "Select local Whisper model folder")
@@ -1095,6 +1218,8 @@ class IcewolfWindow(QMainWindow):
                         self.add_material_button, self.manage_material_button):
             control.setEnabled(not busy)
         listening = busy and self.worker is not None and self.worker.mode in ("wake", "resume_wake")
+        self.avatar_window.listen_button.setEnabled(not busy or listening)
+        self.avatar_window.listen_button.setText("Stop" if listening else "Start listening")
         self.repo_button.setEnabled(not busy or listening)
         self.voice_repo_button.setEnabled(not busy or listening)
         for button in (self.push_button, self.voice_button):
@@ -1216,6 +1341,7 @@ class IcewolfWindow(QMainWindow):
             self.stop_button.setEnabled(False)
             self.push_button.setEnabled(False)
             self.voice_button.setEnabled(False)
+            self.avatar_window.listen_button.setEnabled(False)
             self.set_status("Stopping — speech stops shortly; other operations may need to finish")
 
     def clear_conversation(self):
@@ -1230,6 +1356,10 @@ class IcewolfWindow(QMainWindow):
             event.ignore()
         else:
             self.monitor_timer.stop()
+            self.avatar_window.hide()
+            self.avatar_window.core.timer.stop()
+            if self.tray is not None:
+                self.tray.hide()
             if self.model_process.state() != QProcess.ProcessState.NotRunning:
                 self.model_process.kill()
                 self.model_process.waitForFinished(1000)
