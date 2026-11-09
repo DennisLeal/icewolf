@@ -5,7 +5,7 @@
 [Setup]
 AppId={{BA0C846D-53A8-4E99-96E2-B90E942D33E8}
 AppName=Icewolf
-AppVersion=0.1.0
+AppVersion=0.2.0
 AppPublisher=Icewolf
 DefaultDirName={localappdata}\Programs\Icewolf
 DefaultGroupName=Icewolf
@@ -28,6 +28,7 @@ Name: "migrate"; Description: "Copy existing project settings and agent material
 [Files]
 Source: "..\dist\Icewolf\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "..\README.md"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\ICEWOLF-DEMO-SCRIPT.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\models\kokoro\kokoro-v1.0.onnx"; DestDir: "{localappdata}\Icewolf\UserData\models\kokoro"; Flags: onlyifdoesntexist uninsneveruninstall
 Source: "..\models\kokoro\voices-v1.0.bin"; DestDir: "{localappdata}\Icewolf\UserData\models\kokoro"; Flags: onlyifdoesntexist uninsneveruninstall
 

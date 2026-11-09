@@ -779,6 +779,19 @@ class DesktopTests(unittest.TestCase):
         self.assertEqual(requested, [True])
         self.assertTrue(worker.stop_event.is_set())
 
+    def test_project_links_display_without_fetching(self):
+        client, speaker = MagicMock(), MagicMock()
+        worker = AssistantWorker(client, "text", "")
+        messages = []
+        worker.message.connect(lambda role, text: messages.append((role, text)))
+        with patch("icewolf.desktop.github_repo.fetch_overview") as fetch:
+            worker.handle_transcript("Show project links.", speaker)
+        self.assertIn("https://github.com/DennisLeal/icewolf", messages[-1][1])
+        self.assertIn("https://github.com/ethanplusai/jarvis", messages[-1][1])
+        fetch.assert_not_called()
+        client.reply.assert_not_called()
+        self.assertIn("displayed", speaker.say.call_args.args[0])
+
 
 if __name__ == "__main__":
     unittest.main()

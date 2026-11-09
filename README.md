@@ -1,5 +1,9 @@
 # Icewolf
 
+**Current version: 0.2.0** — a local-first Windows voice assistant with an
+experimental desktop HUD. See the [recording script](ICEWOLF-DEMO-SCRIPT.md)
+for a guided feature walkthrough and privacy reminders.
+
 Icewolf is an offline-first, local voice assistant for Windows. This first
 milestone includes a **command-line prototype and an initial desktop HUD**,
 with push-to-talk and opt-in wake-word listening. It records from your microphone, transcribes with a
@@ -11,6 +15,21 @@ There are no subscriptions or paid APIs. Installing dependencies and obtaining
 models requires an internet connection once; normal operation can then be
 offline. Models use disk space and inference takes time: local does not mean
 zero latency. Voice quality and speed depend on your PC and installed voice.
+Gmail and public GitHub repository lookups are optional online integrations.
+
+### What's in 0.2.0
+
+- Per-user Windows installer, dashboard, Voice view, and desktop avatar mode.
+- Local wake phrase, continuous conversation, offline speech and local Ollama.
+- Local document-backed advisor agents, including the NICE IEX wizard.
+- Optional Gmail inbox reports and public GitHub README overviews.
+- Experimental typed replies in Tagalog, Cebuano and Hiligaynon. Voice remains
+  English-only, and model quality varies by language.
+
+The assistant cannot yet autonomously create PDFs, send or modify email, or
+execute arbitrary tasks. Broader Google account permissions alone do not add
+these capabilities: Icewolf currently implements inbox reports only, even
+though its Gmail authorization requests the broader `gmail.modify` scope.
 
 ## Architecture and roadmap
 
@@ -256,6 +275,8 @@ optional desktop shortcut. It includes the local Kokoro voice files. It does
 not install Ollama or an Ollama language model; both must be available
 separately. Whisper uses the existing local cache or a folder selected in
 Configuration.
+The installer and included documentation identify this version as 0.2.0.
+Building the installer locally does not create a GitHub Release.
 
 The optional migration task copies the existing project settings and agent
 database to `%LOCALAPPDATA%\Icewolf\UserData` only when the corresponding
@@ -294,7 +315,8 @@ and listens again after each reply without another wake phrase. The microphone
 remains active while waiting for conversation until you stop the session.
 Icewolf waits for 3 seconds of detected silence after you speak before responding.
 Under **Configuration**, adjust **Wait after you stop speaking** from 1.5 to
-8 seconds between sessions; a longer setting accommodates longer pauses but delays replies.
+8 seconds between sessions; 3 seconds is the default, but an existing saved
+setting may differ. A longer setting accommodates longer pauses but delays replies.
 Speech detection can still mistake a quiet voice or background noise for silence.
 Individual recordings can retain up to 5 minutes, including pre-roll and the final pause. If
 that limit is exceeded, Icewolf waits for you to finish, reports that the request
@@ -413,10 +435,17 @@ incorrect, so check the source. Repository contents are not saved as agent
 study materials or included in subsequent unrelated questions. As with all
 local-model requests, the existing Ollama offline caveat applies.
 
-### Gmail: optional online, read-only connection
+In an English conversation, say or type **"show project links"** to display
+the Icewolf repository and the Jarvis inspiration repository in the
+conversation. This command displays the links locally; it does not fetch them.
+
+### Gmail: optional online connection
 
 Gmail access contacts Google over the internet and is separate from the local
-LLM. Icewolf asks for `gmail.readonly`, a restricted Google scope; it cannot
+LLM. Icewolf requests `https://www.googleapis.com/auth/gmail.modify`, a
+restricted Google scope that permits reading, composing, sending, and
+modifying Gmail messages, but not immediate permanent deletion bypassing the
+trash. Icewolf currently uses this access only for inbox reports; it cannot
 create drafts or send email. A report contains the latest five inbox senders,
 subjects and previews, not a count of the complete inbox. Icewolf displays the
 previews but speaks only shortened sender names and subjects, followed by a
@@ -439,7 +468,7 @@ To authorize your own account:
    Keep that file private; do not paste it into chat or commit it.
 4. Start the HUD, open **Configuration** and click **Connect or reconnect
    Gmail**, or say **"connect Gmail"** after the wake prompt. Select the JSON
-   file and authorize read-only access in the browser. The credential is stored
+   file and review and authorize Gmail modify access in the browser. The credential is stored
    in Windows Credential Manager under `Icewolf Gmail`.
 5. Say or type **“check my Gmail”** or **“can you check my email?”** to hear
    the latest inbox report. The desktop also accepts phrases such as **“check
@@ -455,6 +484,23 @@ To authorize your own account:
    filtering, unread counts, drafting, sending, and changes are not available.
    Google may require reauthorization when test credentials expire. Revoke
    access from your Google Account's third-party connections if desired.
+
+If Icewolf reports insufficient permission, or you connected before the
+scope changed from `gmail.readonly`, open **Configuration**, select **Connect
+or reconnect Gmail**, choose the same OAuth desktop client JSON, and approve
+the requested access. Consent is requested only when you choose to connect or
+reconnect. The existing credential is not deleted automatically. If Google
+does not return a refresh token, Icewolf reuses the saved token only if the
+OAuth client and Gmail account match and a refresh confirms modify access.
+Otherwise it preserves the old credential and asks you to reconnect again.
+
+For manual recovery only, you can remove the `Icewolf Gmail` entry in Windows
+Credential Manager and reconnect after reviewing the impact: this removes the
+local saved authorization, not Google's account grant, and requires a fresh
+successful authorization. Do not remove it automatically. Google Cloud must
+have the Gmail API enabled, the modify scope configured, and the correct test
+user included for an external app in testing. Restricted scopes may require
+Google verification for broader distribution.
 
 Consult Google's [Python quickstart](https://developers.google.com/workspace/gmail/api/quickstart/python)
 and [scope documentation](https://developers.google.com/workspace/gmail/api/auth/scopes)

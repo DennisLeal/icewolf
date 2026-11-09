@@ -40,6 +40,10 @@ KOKORO_MODEL = data_root() / "models" / "kokoro" / "kokoro-v1.0.onnx"
 KOKORO_VOICES = data_root() / "models" / "kokoro" / "voices-v1.0.bin"
 CONVERSATION_SILENCE_SECONDS = 3.0
 CONVERSATION_MAX_SECONDS = 300
+PROJECT_LINKS = (
+    "Icewolf repository: https://github.com/DennisLeal/icewolf\n"
+    "Jarvis inspiration: https://github.com/ethanplusai/jarvis"
+)
 
 
 def system_reduced_motion() -> bool:
@@ -296,7 +300,10 @@ class AssistantWorker(QThread):
             if self.mode == "connect_gmail":
                 self.status_changed.emit("Waiting for Google authorization")
                 gmail.connect(self.text)
-                self.message.emit("System", "Gmail connected with read-only access.")
+                self.message.emit(
+                    "System", "Gmail connected with modify permission. Icewolf currently "
+                    "provides inbox reports only."
+                )
                 return
             if self.mode == "gmail":
                 self.status_changed.emit("Reading Gmail inbox")
@@ -399,6 +406,14 @@ class AssistantWorker(QThread):
         if self.stop_event.is_set():
             return
         normalized = " ".join(text.lower().strip(" .?!").split())
+        if normalized in ("show project links", "show the project links"):
+            self.message.emit("Icewolf", PROJECT_LINKS)
+            self.status_changed.emit("Speaking")
+            speaker.say(
+                "I have displayed the Icewolf and Jarvis repository links in the conversation.",
+                stop_event=self.stop_event,
+            )
+            return
         repo_request = github_repo.extract_repository_request(text)
         if repo_request:
             if re.search(r"\b(?:do not|don't|never)\s+(?:check|fetch|open|access|inspect|read)\b",
@@ -663,7 +678,10 @@ class IcewolfWindow(QMainWindow):
         self.connect_gmail_button = QPushButton("Connect or reconnect Gmail")
         self.connect_gmail_button.clicked.connect(self.connect_gmail)
         settings_layout.addWidget(self.connect_gmail_button)
-        settings_note = QLabel("Gmail uses online read-only access. Speech uses local Kokoro Adam.")
+        settings_note = QLabel(
+            "Gmail requests modify permission online; Icewolf currently reads inbox reports only. "
+            "Speech uses local Kokoro Adam."
+        )
         settings_note.setWordWrap(True)
         settings_layout.addWidget(settings_note)
         self.reduce_motion = QCheckBox("Reduce avatar motion")
