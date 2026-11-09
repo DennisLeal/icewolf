@@ -351,6 +351,40 @@ Icewolf** in the tray ends the application and its voice session. Minimize
 or use avatar mode to keep it running. Icewolf does not start automatically
 with Windows.
 
+### Customizing the assistant
+
+Configuration lets you choose the local Ollama model, Whisper folder,
+conversation pause, typed conversation language and avatar motion. The agent
+wizard lets you define your own advisor and attach local documents.
+
+The assistant's name and wake phrase are not configurable in the UI. To
+customize them, obtain the source, make a backup, and use the Windows setup
+instructions above to create a development environment. The installed
+executable does not automatically pick up changes to source files.
+
+1. Edit `SYSTEM_PROMPT` and the role-specific prompts in `icewolf\ollama.py`
+   to change the assistant's identity and how it addresses the user.
+2. Update the transcription prompt in `icewolf\audio.py` and the fixed greeting,
+   window labels, status messages, and command handling in
+   `icewolf\desktop.py`. Search for both `Icewolf` and `Dennis`; changing the
+   prompt alone does not change all displayed or spoken names.
+3. For a different wake phrase, update `is_icewolf_phrase`, the inline-request
+   matcher, and the transcription prompt in `icewolf\wake.py`. Also update the
+   wake handoff, greeting and labels in `icewolf\desktop.py`; review the CLI
+   in `icewolf\__main__.py` if you use it. The detector is experimental, so
+   recognition of a new phrase is not guaranteed.
+4. Update the related tests in `tests\test_wake.py` and
+   `tests\test_desktop.py`; run the suite as described below, then try the new
+   phrase with your own microphone. Run the desktop from source using
+   `.\.venv\Scripts\python.exe -m icewolf.desktop`.
+5. To install your modified version, follow the installer rebuild instructions
+   above. Changing the installer name, shortcuts, user-data location or Gmail
+   credential name also requires separate changes to packaging or application
+   code; plan data migration carefully before doing so.
+
+Never commit personal settings, OAuth client files, tokens, or private study
+materials. Review model and dependency licenses before distributing your copy.
+
 ### Create a local document-backed agent
 
 The desktop's **Create agent** button opens a wizard prefilled for a

@@ -182,7 +182,34 @@ Conversation and wait for the reply. Restore English afterwards.
 Quality depends on the local model and Hiligaynon may be unreliable. Voice,
 agent commands and conversation integrations currently require English."
 
-## 11. Closing and next steps
+## 11. Personalize Icewolf
+
+**Show:**
+
+1. Open **Configuration** and show how to choose an installed Ollama model,
+   select a Whisper folder, adjust the speech pause and change the typed
+   conversation language. Show **Reduce avatar motion** if desired.
+2. Show the **Create agent** wizard to demonstrate choosing a different role
+   and adding your own authorized study materials.
+
+**Say:** "Some options can be changed directly in Icewolf. You can pick your
+local model, change how long it waits after you speak, adjust avatar motion,
+or create your own document-backed advisor."
+
+**Say:** "Changing the assistant's name or wake phrase is not a setting yet.
+To do that, you need a copy of the source code, Python, the project
+dependencies and a rebuilt application. Changing only the words on screen
+doesn't change what the microphone listens for."
+
+**Show:** Open your local source folder in an editor and point to the
+**Customizing the assistant** section of the README.
+
+**Say:** "The README identifies where the assistant's prompt, greeting, wake
+phrase and display labels are defined, plus how to run and rebuild your
+modified copy. Keep backups, avoid sharing your settings or credentials, and
+test the new wake phrase before relying on it."
+
+## 12. Closing and next steps
 
 **Show:** Return to Conversation, select English, and stop listening.
 
