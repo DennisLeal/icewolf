@@ -242,6 +242,11 @@ Install the optional desktop dependencies once, then launch:
 .\.venv\Scripts\python.exe -m icewolf.desktop
 ```
 
+After setup, you can also double-click **Start-Icewolf.cmd** in the project
+folder to launch the HUD without a console window. Ollama must be running with
+the configured local model available. Opening Icewolf does not automatically
+enable the microphone.
+
 The HUD selects the cached `base.en` Whisper model if available; otherwise
 choose its local model folder under **Configuration**. Whisper converts your
 speech into text; Kokoro turns Icewolf's replies into speech. `base.en` is a
@@ -273,6 +278,20 @@ not capture all system audio or monitor the microphone during replies.
 Choose **Voice view** in the sidebar for a larger core and a focused
 listening control; **Conversation** returns to the dashboard. Both views
 control the same voice session.
+
+Select **Avatar-only mode** in the sidebar to replace the HUD with a small,
+movable desktop avatar. Drag the avatar to reposition it. Its **Start
+listening** / **Stop** button controls the same opt-in voice session, and
+**Open HUD** returns to the full interface without restarting that session.
+The avatar reflects voice status and audio levels, and respects **Reduce
+avatar motion**. It stays behind ordinary windows rather than covering other
+apps; it is a small window, not a desktop icon. Windows **Show desktop** can
+minimize it as well. If the Windows system tray is available, click the Icewolf
+tray icon or use its menu to restore the HUD or avatar; otherwise restore the
+avatar from its taskbar entry. Closing the full HUD or choosing **Exit
+Icewolf** in the tray ends the application and its voice session. Minimize
+or use avatar mode to keep it running. Icewolf does not start automatically
+with Windows.
 
 ### Create a local document-backed agent
 

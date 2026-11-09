@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PyQt6.QtWidgets import QApplication, QDialogButtonBox, QLineEdit
-from PyQt6.QtCore import QEventLoop, QPoint, QTimer
+from PyQt6.QtCore import QEventLoop, QPoint, QTimer, Qt
 
 from icewolf.audio import SpeechTooLong
 from icewolf.agents import Agent, AgentStore, Passage
@@ -529,7 +529,87 @@ class DesktopTests(unittest.TestCase):
             self.window.reduce_motion.setChecked(reduced)
             self.assertEqual(self.window.core.timer.isActive(), not reduced)
             self.assertEqual(self.window.voice_core.timer.isActive(), not reduced)
+            self.assertEqual(self.window.avatar_window.core.timer.isActive(), not reduced)
             save.assert_called_once_with("reduce_motion", reduced)
+
+    def test_avatar_mode_shares_voice_and_restores_hud_without_restarting(self):
+        self.window.show()
+        worker = MagicMock()
+        worker.mode = "wake"
+        self.window.worker = worker
+        self.window.set_busy(True)
+        self.window.set_status("Conversation listening — speak now")
+        self.window.set_audio_level(0.7)
+        self.window.avatar_button.click()
+        self.app.processEvents()
+        avatar = self.window.avatar_window
+        self.assertFalse(self.window.isVisible())
+        self.assertTrue(avatar.isVisible())
+        self.assertTrue(avatar.windowFlags() & Qt.WindowType.WindowStaysOnBottomHint)
+        self.assertEqual(avatar.core.state, "LISTENING")
+        self.assertEqual(avatar.core.level, 0.7)
+        self.assertEqual(avatar.listen_button.text(), "Stop")
+        self.assertIs(self.window.worker, worker)
+        avatar.hud_button.click()
+        self.assertTrue(self.window.isVisible())
+        self.assertFalse(avatar.isVisible())
+        self.assertIs(self.window.worker, worker)
+        worker.stop.assert_not_called()
+        self.window.worker = None
+
+    def test_avatar_listening_button_starts_and_stops_same_session(self):
+        self.window.show_avatar()
+        with patch.object(self.window, "start_worker") as start:
+            self.window.avatar_window.listen_button.click()
+            start.assert_called_once_with("wake")
+        worker = MagicMock()
+        worker.mode = "wake"
+        self.window.worker = worker
+        self.window.set_busy(True)
+        self.window.avatar_window.listen_button.click()
+        worker.stop.assert_called_once()
+        self.assertFalse(self.window.avatar_window.listen_button.isEnabled())
+        self.window.worker = None
+
+    def test_avatar_close_restores_hud_and_main_close_hides_avatar(self):
+        self.window.show_avatar()
+        self.window.avatar_window.close()
+        self.assertTrue(self.window.isVisible())
+        self.assertFalse(self.window.avatar_window.isVisible())
+        self.window.show_avatar()
+        self.window.close()
+        self.assertFalse(self.window.avatar_window.isVisible())
+
+    def test_avatar_updates_error_and_disables_listening_for_other_work(self):
+        self.window.show_avatar()
+        self.window.worker = MagicMock(mode="text")
+        self.window.set_busy(True)
+        self.assertFalse(self.window.avatar_window.listen_button.isEnabled())
+        self.window.show_error("Microphone unavailable")
+        self.assertEqual(self.window.avatar_window.core.state, "ERROR")
+        self.assertIn("Error", self.window.avatar_window.toolTip())
+        self.window.worker = None
+
+    def test_exit_from_avatar_stops_active_voice_before_closing(self):
+        self.window.show_avatar()
+        worker = MagicMock(mode="wake")
+        self.window.worker = worker
+        self.window.set_busy(True)
+        self.assertFalse(self.window.close())
+        self.assertTrue(self.window.closing)
+        self.assertTrue(self.window.avatar_window.isVisible())
+        worker.stop.assert_called_once()
+        self.window.worker_finished()
+        self.assertFalse(self.window.avatar_window.isVisible())
+        self.assertIsNone(self.window.worker)
+
+    def test_avatar_tray_activation_restores_hud(self):
+        from PyQt6.QtWidgets import QSystemTrayIcon
+        self.window.show_avatar()
+        self.window.avatar_window.showMinimized()
+        self.window.tray_activated(QSystemTrayIcon.ActivationReason.Trigger)
+        self.assertTrue(self.window.isVisible())
+        self.assertFalse(self.window.avatar_window.isVisible())
 
     def test_voice_view_shares_status_audio_and_listening_controls(self):
         self.window.show()
