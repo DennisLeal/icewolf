@@ -1,0 +1,9 @@
+.venv/
+__pycache__/
+*.py[cod]
+.env
+models/
+*.wav
+icewolf-settings.ini
+data/
+client_secret*.json
