@@ -15,6 +15,7 @@ from icewolf.agents import Agent, AgentStore, Passage
 from icewolf.github_repo import RepositoryOverview
 from icewolf.desktop import (
     CONVERSATION_MAX_SECONDS, AssistantWorker, CoreDisplay, IcewolfWindow, create_speaker,
+    data_root,
 )
 
 
@@ -38,6 +39,26 @@ class DesktopTests(unittest.TestCase):
         self.assertFalse(hasattr(self.window, "voice_input"))
         self.assertIn("No agents", self.window.agent_status.text())
 
+    def test_installed_application_uses_user_data_not_program_folder(self):
+        with tempfile.TemporaryDirectory() as folder, \
+             patch.dict(os.environ, {"LOCALAPPDATA": folder}), \
+             patch("icewolf.desktop.sys.frozen", True, create=True):
+            self.assertEqual(data_root(), Path(folder) / "Icewolf" / "UserData")
+            window = IcewolfWindow()
+            try:
+                self.assertEqual(window.agent_store.path,
+                                 Path(folder) / "Icewolf" / "UserData" / "data" / "agents.sqlite3")
+                self.assertEqual(Path(window.settings.fileName()),
+                                 Path(folder) / "Icewolf" / "UserData" / "icewolf-settings.ini")
+            finally:
+                window.close()
+
+    def test_installed_application_requires_localappdata(self):
+        with patch.dict(os.environ, {}, clear=True), \
+             patch("icewolf.desktop.sys.frozen", True, create=True), \
+             self.assertRaisesRegex(RuntimeError, "LOCALAPPDATA"):
+            data_root()
+
     def test_clear_resets_conversation_and_log(self):
         self.window.client = MagicMock()
         self.window.append_message("You", "Hello")
@@ -51,6 +72,43 @@ class DesktopTests(unittest.TestCase):
         self.assertIsNone(self.window.worker)
         self.assertIn("select a local Whisper", self.window.status.text())
         self.assertEqual(self.window.core.state, "ERROR")
+
+    def test_non_english_voice_is_explicitly_unavailable(self):
+        previous = self.window.language_input.currentText()
+        self.window.language_input.blockSignals(True)
+        self.window.language_input.setCurrentText("Cebuano")
+        try:
+            self.window.start_wake()
+            self.assertIsNone(self.window.worker)
+            self.assertIn("voice currently requires English", self.window.status.text())
+        finally:
+            self.window.language_input.setCurrentText(previous)
+            self.window.language_input.blockSignals(False)
+
+    def test_non_english_text_uses_model_without_speech(self):
+        client = MagicMock()
+        client.reply.return_value = "Kumusta!"
+        worker = AssistantWorker(client, "text", "", "Hello", language="Tagalog")
+        messages = []
+        worker.message.connect(lambda role, text: messages.append((role, text)))
+        with patch("icewolf.desktop.create_speaker") as speaker:
+            worker.run()
+        client.reply.assert_called_once_with("Hello", language="Tagalog")
+        speaker.assert_not_called()
+        self.assertIn(("Icewolf", "Kumusta!"), messages)
+
+    def test_language_selection_persists(self):
+        with tempfile.TemporaryDirectory() as folder, \
+             patch("icewolf.desktop.data_root", return_value=Path(folder)):
+            window = IcewolfWindow()
+            window.language_input.setCurrentText("Hiligaynon")
+            window.settings.sync()
+            window.close()
+            restored = IcewolfWindow()
+            try:
+                self.assertEqual(restored.language_input.currentText(), "Hiligaynon")
+            finally:
+                restored.close()
 
     def test_core_indicator_tracks_actual_worker_status(self):
         for status, expected in (

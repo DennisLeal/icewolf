@@ -247,6 +247,42 @@ folder to launch the HUD without a console window. Ollama must be running with
 the configured local model available. Opening Icewolf does not automatically
 enable the microphone.
 
+### Windows installer
+
+The per-user installer is built as `dist\Icewolf-Setup.exe`. Close any running
+Icewolf instance before installing. The installer places the application in
+`%LOCALAPPDATA%\Programs\Icewolf`, creates a Start menu shortcut, and offers an
+optional desktop shortcut. It includes the local Kokoro voice files. It does
+not install Ollama or an Ollama language model; both must be available
+separately. Whisper uses the existing local cache or a folder selected in
+Configuration.
+
+The optional migration task copies the existing project settings and agent
+database to `%LOCALAPPDATA%\Icewolf\UserData` only when the corresponding
+destination file does not already exist. It never removes the originals.
+Gmail authorization remains in Windows Credential Manager. If the agent
+database is in use, migration stops and asks you to close Icewolf. Uninstall
+does not remove the user data or voice models; delete those separately only
+if you no longer want them. The installer is unsigned and Windows may show a
+publisher warning.
+
+To rebuild on this PC, install the GUI and build requirements in `.venv`,
+install the Inno Setup compiler at `.tools\InnoSetup`, and run
+`.\packaging\build-installer.ps1` in PowerShell. The build requires the two
+Kokoro model files in `models\kokoro`. Generated build output is ignored by
+Git. The migration source is the project folder on the build PC, so on another
+PC this optional migration only works if its original data is at that same
+path. No personal settings, study materials, or credentials are bundled in
+the installer.
+
+The **Typed conversation language** selector in Configuration offers English,
+Tagalog, Cebuano (Bisaya), and Hiligaynon. The three additional choices are
+experimental: they ask the selected local LLM to respond in that language, and
+the quality depends on the model. They support typed conversation only and do
+not speak responses. Voice recognition, voice output, and conversation-driven
+integrations and agent commands still require English. Select English again to
+use those features. This setting does not install language models.
+
 The HUD selects the cached `base.en` Whisper model if available; otherwise
 choose its local model folder under **Configuration**. Whisper converts your
 speech into text; Kokoro turns Icewolf's replies into speech. `base.en` is a

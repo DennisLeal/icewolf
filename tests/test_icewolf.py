@@ -84,6 +84,15 @@ class OllamaTests(unittest.TestCase):
         client.clear_history()
         self.assertEqual(client.messages, [{"role": "system", "content": SYSTEM_PROMPT}])
 
+    def test_selected_language_is_sent_without_changing_system_history(self):
+        client = OllamaClient("local")
+        with patch.object(client, "_post", return_value={"message": {"content": "ok"}}) as post:
+            client.reply("Kumusta?", language="Tagalog")
+        self.assertIn("Respond in Tagalog.", post.call_args.args[1]["messages"][0]["content"])
+        self.assertEqual(client.messages[0]["content"], SYSTEM_PROMPT)
+        with self.assertRaises(ValueError):
+            client.reply("Hi", language="unsupported")
+
 
 class VoiceTests(unittest.TestCase):
     def test_silero_conversation_keeps_speech_after_two_second_pause(self):

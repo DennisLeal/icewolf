@@ -19,6 +19,7 @@ SYSTEM_PROMPT = (
     "You have no access to live information or tools unless explicitly provided."
 )
 MAX_RESPONSE_BYTES = 4 * 1024 * 1024
+RESPONSE_LANGUAGES = ("English", "Tagalog", "Cebuano", "Hiligaynon")
 
 
 class OllamaClient:
@@ -72,10 +73,18 @@ class OllamaClient:
         if info.get("remote_host") or info.get("remote_model"):
             raise RuntimeError("Ollama reports this model is remote; use a local model.")
 
-    def reply(self, text: str) -> str:
+    def reply(self, text: str, language: str = "English") -> str:
+        if language not in RESPONSE_LANGUAGES:
+            raise ValueError("Unsupported response language.")
         messages = self.messages + [{"role": "user", "content": text}]
+        request_messages = list(messages)
+        if language != "English":
+            request_messages[0] = {
+                "role": "system",
+                "content": SYSTEM_PROMPT + f" Respond in {language}.",
+            }
         result = self._post(
-            "/api/chat", {"model": self.model, "messages": messages, "stream": False}
+            "/api/chat", {"model": self.model, "messages": request_messages, "stream": False}
         )
         message = result.get("message")
         content = message.get("content") if isinstance(message, dict) else None

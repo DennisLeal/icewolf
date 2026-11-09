@@ -22,7 +22,7 @@ from .agents import AgentStore, BUILTIN_ROLES
 from .audio import SAMPLE_RATE, KokoroSpeaker, SpeechTooLong, VoicePipeline
 from . import gmail
 from . import github_repo
-from .ollama import OllamaClient
+from .ollama import OllamaClient, RESPONSE_LANGUAGES
 from .wake import IcewolfPhraseListener
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -275,7 +275,7 @@ class AssistantWorker(QThread):
 
     def __init__(self, client, mode: str, whisper_path: str, text: str = "", agents=(),
                  end_silence_seconds: float = CONVERSATION_SILENCE_SECONDS,
-                 custom_agents=(), agent_store=None):
+                 custom_agents=(), agent_store=None, language="English"):
         super().__init__()
         self.client = client
         self.mode = mode
@@ -285,6 +285,7 @@ class AssistantWorker(QThread):
         self.end_silence_seconds = end_silence_seconds
         self.custom_agents = {agent.name: agent for agent in custom_agents}
         self.agent_store = agent_store
+        self.language = language
         self.stop_event = threading.Event()
 
     def stop(self):
@@ -311,6 +312,12 @@ class AssistantWorker(QThread):
             self.client.check_model()
             self.model_checked.emit()
             if self.stop_event.is_set():
+                return
+            if self.mode == "text" and self.language != "English":
+                self.status_changed.emit("Thinking")
+                response = self.client.reply(self.text, language=self.language)
+                if not self.stop_event.is_set():
+                    self.message.emit("Icewolf", response)
                 return
             self.status_changed.emit("Loading local voice")
             speaker = create_speaker()
@@ -608,6 +615,24 @@ class IcewolfWindow(QMainWindow):
             lambda: self.settings.setValue("model", self.model_input.currentText().strip())
         )
         settings_layout.addWidget(self.model_input)
+        settings_layout.addWidget(QLabel("Typed conversation language"))
+        self.language_input = QComboBox()
+        self.language_input.addItems(RESPONSE_LANGUAGES)
+        saved_language = self.settings.value("response_language", "English", type=str)
+        self.language_input.setCurrentText(
+            saved_language if saved_language in RESPONSE_LANGUAGES else "English"
+        )
+        self.language_input.currentTextChanged.connect(
+            lambda value: self.settings.setValue("response_language", value)
+        )
+        settings_layout.addWidget(self.language_input)
+        language_note = QLabel(
+            "Tagalog, Cebuano and Hiligaynon are experimental typed conversation only. "
+            "Voice and integrations currently require English."
+        )
+        language_note.setWordWrap(True)
+        language_note.setObjectName("muted")
+        settings_layout.addWidget(language_note)
         settings_layout.addWidget(QLabel("Whisper model folder (speech recognition)"))
         self.whisper_input = QLineEdit(default_whisper_path())
         self.whisper_input.setPlaceholderText("Select local model folder")
@@ -1147,6 +1172,9 @@ class IcewolfWindow(QMainWindow):
         self.log.appendPlainText(f"{role}: {text}\n")
 
     def open_repo_dialog(self):
+        if self.language_input.currentText() != "English":
+            self.set_status("Error — repository access currently requires English; change it in Configuration")
+            return
         if self.worker is not None:
             if self.worker.mode in ("wake", "resume_wake"):
                 self.pending_repo = True
@@ -1222,7 +1250,7 @@ class IcewolfWindow(QMainWindow):
         self.pending_connect = True
 
     def set_busy(self, busy: bool):
-        for control in (self.model_input, self.whisper_input, self.browse_button, self.speech_pause,
+        for control in (self.model_input, self.language_input, self.whisper_input, self.browse_button, self.speech_pause,
                         self.wake_button, self.send_button,
                         self.text_input, self.clear_button, self.connect_gmail_button,
                         self.agent_select, self.attach_button, self.create_agent_button,
@@ -1247,6 +1275,14 @@ class IcewolfWindow(QMainWindow):
     def start_worker(self, mode: str, text: str = ""):
         if self.worker is not None:
             return
+        language = self.language_input.currentText()
+        if language != "English":
+            if mode == "gmail":
+                self.set_status("Error — Gmail reports currently require English; change it in Configuration")
+                return
+            if mode not in ("text", "connect_gmail"):
+                self.set_status("Error — voice currently requires English; change it in Configuration")
+                return
         model = self.model_input.currentText().strip()
         if mode in ("connect_gmail", "gmail"):
             self.worker = AssistantWorker(None, mode, "", text, self.agents)
@@ -1273,7 +1309,7 @@ class IcewolfWindow(QMainWindow):
             return
         self.worker = AssistantWorker(self.client, mode, self.whisper_input.text(), text,
                                       self.agents, self.speech_pause.value(),
-                                      self.custom_agents, self.agent_store)
+                                      self.custom_agents, self.agent_store, language)
         self.worker.status_changed.connect(self.set_status)
         self.worker.model_checked.connect(
             lambda: self.llm_status.setText(f"LLM: {model} checked")
