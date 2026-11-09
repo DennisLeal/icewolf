@@ -26,8 +26,18 @@ from .ollama import OllamaClient
 from .wake import IcewolfPhraseListener
 
 ROOT = Path(__file__).resolve().parent.parent
-KOKORO_MODEL = ROOT / "models" / "kokoro" / "kokoro-v1.0.onnx"
-KOKORO_VOICES = ROOT / "models" / "kokoro" / "voices-v1.0.bin"
+
+
+def data_root() -> Path:
+    if getattr(sys, "frozen", False):
+        if not os.environ.get("LOCALAPPDATA"):
+            raise RuntimeError("LOCALAPPDATA is required for the installed Icewolf application.")
+        return Path(os.environ["LOCALAPPDATA"]) / "Icewolf" / "UserData"
+    return ROOT
+
+
+KOKORO_MODEL = data_root() / "models" / "kokoro" / "kokoro-v1.0.onnx"
+KOKORO_VOICES = data_root() / "models" / "kokoro" / "voices-v1.0.bin"
 CONVERSATION_SILENCE_SECONDS = 3.0
 CONVERSATION_MAX_SECONDS = 300
 
@@ -510,14 +520,15 @@ class IcewolfWindow(QMainWindow):
         self.pending_repo = False
         self.resume_after_repo = False
         self.agents = set()
-        self.agent_store = AgentStore(ROOT / "data" / "agents.sqlite3")
+        self.agent_store = AgentStore(data_root() / "data" / "agents.sqlite3")
         self.custom_agents = []
         self.agent_load_error = None
         try:
             self.custom_agents = self.agent_store.list_agents()
         except (OSError, sqlite3.Error) as exc:
             self.agent_load_error = str(exc)
-        self.settings = QSettings(str(ROOT / "icewolf-settings.ini"), QSettings.Format.IniFormat)
+        data_root().mkdir(parents=True, exist_ok=True)
+        self.settings = QSettings(str(data_root() / "icewolf-settings.ini"), QSettings.Format.IniFormat)
         self.setWindowTitle("Icewolf")
         self.resize(1280, 800)
         self.setMinimumSize(1000, 680)

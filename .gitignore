@@ -7,3 +7,6 @@ models/
 icewolf-settings.ini
 data/
 client_secret*.json
+.tools/
+build/
+dist/
