@@ -29,7 +29,7 @@ RESPONSE_LANGUAGES = ("English", "Tagalog", "Cebuano", "Hiligaynon")
 
 
 class OllamaClient:
-    def __init__(self, model: str, timeout: float = 180):
+    def __init__(self, model: str, timeout: float = 60):
         if not MODEL_NAME.fullmatch(model) or "cloud" in model.lower():
             raise ValueError(
                 "Use a simple local Ollama model name, such as llama3.2:3b; "

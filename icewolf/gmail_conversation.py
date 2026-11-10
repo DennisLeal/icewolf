@@ -54,11 +54,11 @@ def _plan(client, text: str) -> dict:
             "body": {"type": "string"},
             "label": {"type": "string"},
         },
-        "required": ["action", "query", "target", "recipient", "subject", "body", "label"],
+        "required": ["action"],
     }
     client.check_model()
     result = client._post("/api/chat", {
-        "model": client.model, "stream": False, "format": schema,
+        "model": client.model, "stream": False,
         "messages": [
             {"role": "system", "content": (
                 "Interpret only the user's Gmail request into JSON. Never invent email addresses, "
@@ -75,9 +75,23 @@ def _plan(client, text: str) -> dict:
         plan = json.loads(result["message"]["content"])
     except (KeyError, TypeError, json.JSONDecodeError) as exc:
         raise RuntimeError("I could not interpret that Gmail request. Please rephrase it.") from exc
-    fields = ("action", "query", "target", "recipient", "subject", "body", "label")
-    if not isinstance(plan, dict) or any(not isinstance(plan.get(key), str) for key in fields):
+    if not isinstance(plan, dict):
         raise RuntimeError("I could not interpret that Gmail request safely. Please rephrase it.")
+    allowed_actions = {
+        "list", "read", "send", "draft", "reply", "reply_draft", "mark_read",
+        "mark_unread", "archive", "star", "unstar", "add_label", "remove_label", "trash", "unsupported",
+    }
+    if (not isinstance(plan.get("action"), str)) or (plan.get("action") not in allowed_actions):
+        raise RuntimeError("I could not interpret that Gmail request safely. Please rephrase it.")
+    defaults = {
+        "action": "", "query": "", "target": "", "recipient": "", "subject": "",
+        "body": "", "label": "",
+    }
+    for key, value in defaults.items():
+        if key not in plan:
+            plan[key] = value
+        elif not isinstance(plan[key], str):
+            plan[key] = str(plan[key])
     return plan
 
 
