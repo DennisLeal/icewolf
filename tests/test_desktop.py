@@ -9,6 +9,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PyQt6.QtWidgets import QApplication, QDialogButtonBox, QLineEdit
 from PyQt6.QtCore import QEventLoop, QPoint, QTimer, Qt
+from PyQt6.QtTest import QTest
 
 from icewolf.audio import SpeechTooLong
 from icewolf.agents import Agent, AgentStore, Passage
@@ -133,6 +134,33 @@ class DesktopTests(unittest.TestCase):
         self.window.set_busy(False)
         self.assertTrue(self.window.wake_button.isEnabled())
         self.assertFalse(self.window.stop_button.isEnabled())
+
+    def test_gmail_tools_available_during_listening(self):
+        for mode in ("wake", "resume_wake", "presentation"):
+            with self.subTest(mode=mode):
+                worker = MagicMock(mode=mode)
+                self.window.worker = worker
+                self.window.set_busy(True)
+                self.assertTrue(self.window.gmail_tools_button.isEnabled())
+                self.window.gmail_tools_button.click()
+                worker.stop.assert_called_once()
+                self.assertEqual(self.window.pending_gmail_tools, "")
+                self.assertFalse(self.window.gmail_tools_button.isEnabled())
+                with patch.object(self.window, "open_gmail_tools") as dialog:
+                    self.window.worker_finished()
+                dialog.assert_called_once_with("", request="")
+                self.assertIsNone(self.window.pending_gmail_tools)
+
+    def test_pdf_email_request_opens_preview_after_worker_stops(self):
+        worker = AssistantWorker(MagicMock(), "wake", "")
+        self.window.worker = worker
+        worker.pdf_email_requested.connect(self.window.request_pdf_email)
+        request = "Create a PDF of popular salads and send it over to me."
+        worker.respond(request, MagicMock())
+        with patch.object(self.window, "open_gmail_tools") as tools:
+            self.window.worker_finished()
+        tools.assert_called_once_with(pdf_request=request)
+        self.assertIsNone(self.window.pending_pdf_email)
 
     def test_main_voice_button_starts_and_stops_wake_session(self):
         with patch.object(self.window, "start_worker") as start:
@@ -791,6 +819,118 @@ class DesktopTests(unittest.TestCase):
         fetch.assert_not_called()
         client.reply.assert_not_called()
         self.assertIn("displayed", speaker.say.call_args.args[0])
+
+    def test_presentation_link_commands_emit_exact_urls_without_fetching(self):
+        examples = {
+            "show icewolf release link": "https://github.com/DennisLeal/icewolf/releases/tag/v0.2.0",
+            "show ollama download link": "https://ollama.com/download/windows",
+            "show git download link": "https://git-scm.com/download/win",
+            "show icewolf clone link": "https://github.com/DennisLeal/icewolf.git",
+            "show kokoro download link": (
+                "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.1"
+            ),
+            "show icewolf repository link": "https://github.com/DennisLeal/icewolf",
+            "show jarvis repository link": "https://github.com/ethanplusai/jarvis",
+        }
+        client, speaker = MagicMock(), MagicMock()
+        worker = AssistantWorker(client, "text", "")
+        displayed, messages = [], []
+        worker.link_requested.connect(lambda title, link: displayed.append((title, link)))
+        worker.message.connect(lambda role, text: messages.append((role, text)))
+        with patch("icewolf.desktop.github_repo.fetch_overview") as fetch:
+            for command, expected in examples.items():
+                with self.subTest(command=command):
+                    worker.handle_transcript(command.capitalize() + ".", speaker)
+                    self.assertEqual(displayed[-1][1], expected)
+                    self.assertIn(expected, messages[-1][1])
+        fetch.assert_not_called()
+        client.reply.assert_not_called()
+
+    def test_presentation_display_is_centered_and_hides(self):
+        screen = QApplication.primaryScreen()
+        self.window.show_presentation_link("Ollama", "https://ollama.com/download/windows")
+        display = self.window.link_display
+        self.assertTrue(display.isVisible())
+        self.assertEqual(display.links.toPlainText(), "https://ollama.com/download/windows")
+        self.assertEqual(display.frameGeometry().center(), screen.availableGeometry().center())
+        self.assertTrue(display.timer.isActive())
+        display.timer.start(30)
+        QTest.qWait(100)
+        self.assertFalse(display.isVisible())
+
+    def test_project_links_signal_reaches_center_display(self):
+        worker = AssistantWorker(MagicMock(), "text", "")
+        worker.link_requested.connect(self.window.show_presentation_link)
+        worker.respond("show project links", MagicMock())
+        self.assertTrue(self.window.link_display.isVisible())
+        self.assertIn("https://github.com/DennisLeal/icewolf", self.window.link_display.links.toPlainText())
+        self.assertIn("https://github.com/ethanplusai/jarvis", self.window.link_display.links.toPlainText())
+
+    def test_started_text_worker_connects_link_display(self):
+        self.window.model_input.setEditText("llama3.2:3b")
+        with patch.object(AssistantWorker, "start"):
+            self.window.start_worker("text", "show ollama download link")
+        worker = self.window.worker
+        try:
+            self.assertIsNotNone(worker)
+            worker.respond("show ollama download link", MagicMock())
+            self.assertTrue(self.window.link_display.isVisible())
+            self.assertEqual(self.window.link_display.links.toPlainText(),
+                             "https://ollama.com/download/windows")
+        finally:
+            self.window.worker = None
+
+    def test_recording_narration_shows_links_silently_once(self):
+        worker = AssistantWorker(MagicMock(), "presentation", "whisper")
+        worker.presentation_conversation = False
+        worker.presentation_seen = set()
+        speaker = MagicMock()
+        links, messages = [], []
+        worker.link_requested.connect(lambda title, url: links.append((title, url)))
+        worker.message.connect(lambda role, text: messages.append((role, text)))
+        worker.handle_presentation_transcript("Visit the Icewolf release page.", speaker)
+        worker.handle_presentation_transcript("The Icewolf release page is here.", speaker)
+        self.assertEqual(len(links), 1)
+        self.assertEqual(links[0][1], "https://github.com/DennisLeal/icewolf/releases/tag/v0.2.0")
+        self.assertIn(links[0][1], messages[0][1])
+        speaker.say.assert_not_called()
+        worker.client.reply.assert_not_called()
+
+    def test_recording_switches_between_narration_and_conversation(self):
+        worker = AssistantWorker(MagicMock(), "presentation", "whisper")
+        worker.presentation_conversation = False
+        worker.presentation_seen = set()
+        speaker = MagicMock()
+        worker.handle_presentation_transcript("Now let's have a conversation.", speaker)
+        self.assertTrue(worker.presentation_conversation)
+        worker.handle_presentation_transcript("Hey Icewolf", speaker)
+        speaker.say.assert_called_once()
+        worker.handle_presentation_transcript("That was our conversation demo.", speaker)
+        self.assertFalse(worker.presentation_conversation)
+        worker.handle_presentation_transcript("The original Jarvis repository.", speaker)
+        self.assertEqual(speaker.say.call_count, 1)
+
+    def test_recording_mode_button_starts_worker(self):
+        with patch.object(self.window, "start_worker") as start:
+            self.window.presentation_button.click()
+        start.assert_called_once_with("presentation")
+
+    def test_recording_script_contains_all_link_cues(self):
+        from icewolf.desktop import PRESENTATION_CUES, PRESENTATION_LINKS
+        script = (Path(__file__).resolve().parent.parent / "ICEWOLF-DEMO-SCRIPT.md").read_text(
+            encoding="utf-8"
+        )
+        normalized = " ".join(script.lower().split())
+        worker = AssistantWorker(MagicMock(), "presentation", "whisper")
+        worker.presentation_conversation = False
+        worker.presentation_seen = set()
+        links = []
+        worker.link_requested.connect(lambda title, url: links.append(url))
+        for cue, command in PRESENTATION_CUES:
+            with self.subTest(cue=cue):
+                self.assertIn(cue, normalized)
+                worker.handle_presentation_transcript(cue, MagicMock())
+                self.assertEqual(links[-1], PRESENTATION_LINKS[command][1])
 
 
 if __name__ == "__main__":

@@ -4,6 +4,7 @@ import os
 import math
 import re
 import logging
+import queue
 from pathlib import Path
 import sqlite3
 import sys
@@ -43,6 +44,28 @@ CONVERSATION_MAX_SECONDS = 300
 PROJECT_LINKS = (
     "Icewolf repository: https://github.com/DennisLeal/icewolf\n"
     "Jarvis inspiration: https://github.com/ethanplusai/jarvis"
+)
+PRESENTATION_LINKS = {
+    "show icewolf release link": ("Icewolf release", "https://github.com/DennisLeal/icewolf/releases/tag/v0.2.0"),
+    "show ollama download link": ("Ollama for Windows", "https://ollama.com/download/windows"),
+    "show git download link": ("Git for Windows", "https://git-scm.com/download/win"),
+    "show icewolf clone link": ("Icewolf clone URL", "https://github.com/DennisLeal/icewolf.git"),
+    "show kokoro download link": (
+        "Kokoro download base URL",
+        "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.1",
+    ),
+    "show icewolf repository link": ("Icewolf repository", "https://github.com/DennisLeal/icewolf"),
+    "show jarvis repository link": ("Jarvis repository", "https://github.com/ethanplusai/jarvis"),
+}
+LINK_DISPLAY_MS = 15000
+PRESENTATION_CUES = (
+    ("icewolf release page", "show icewolf release link"),
+    ("ollama for windows", "show ollama download link"),
+    ("git for windows", "show git download link"),
+    ("icewolf clone address", "show icewolf clone link"),
+    ("kokoro download address", "show kokoro download link"),
+    ("icewolf repository", "show icewolf repository link"),
+    ("original jarvis repository", "show jarvis repository link"),
 )
 
 
@@ -87,6 +110,7 @@ def is_inbox_report_request(text: str) -> bool:
     request = re.sub(r"(?:\s+(?:for me|please|right now|now))+$", "", request)
     mailbox = r"(?:gmail|emails?|mail|inbox|(?:connected )?email account)"
     messages = r"(?:(?:new|latest|recent) )?(?:emails?|mail)"
+    five = r"(?:(?:the|my) )?(?:first|latest|last|most recent) (?:five|5)"
     return bool(re.fullmatch(
         rf"(?:(?:check|read|show|show me|look at) (?:my |the )?"
         rf"(?:(?:new|latest|recent) )?{mailbox}"
@@ -99,7 +123,56 @@ def is_inbox_report_request(text: str) -> bool:
         rf"|are there (?:any )?(?:(?:new|latest|recent) )?messages in (?:my |the )?inbox"
         rf"|what {messages} do i have)",
         request,
+    ) or re.fullmatch(
+        rf"(?:read(?: me| out loud| out| aloud)?|check|show(?: me)?|report|tell me) "
+        rf"{five} (?:emails?|messages)(?: (?:in|from|of) (?:my |the )?(?:inbox|gmail))?"
+        rf"(?: (?:aloud|out loud|to me))?",
+        request,
     ))
+
+
+def gmail_tools_action(text: str) -> str | None:
+    normalized = text.lower().replace("’", "'").replace("e-mail", "email")
+    if re.search(r"\b(?:do not|don't|never|delete|trash|outlook|yahoo)\b", normalized):
+        return None
+    mailbox = re.search(r"\b(?:gmail|emails?|mail|inbox|messages?)\b", normalized) or re.search(
+        r"\b(?:reply to|mark|archive|star|unstar|flag|unflag)\s+(?:that|this|it)\b", normalized
+    )
+    if not mailbox:
+        return None
+    if (re.search(r"\b(?:all|every)\b", normalized)
+            and re.search(r"\b(?:mark|set)\b", normalized)
+            and re.search(r"\bread\b", normalized)
+            and re.search(r"\binbox\b", normalized)):
+        return "bulk_read"
+    if re.search(r"\breply\b", normalized):
+        return "reply"
+    if re.search(r"\b(?:mark|archive|star|unstar|flag|unflag|remove label)\b", normalized) or (
+        re.search(r"\blabel\b", normalized) and re.search(r"\b(?:that|this|it|selected)\b", normalized)
+    ):
+        return "modify"
+    if re.search(r"\bunread\b", normalized) and re.search(
+        r"\b(?:review|check|read|report|summarize|summarise|show)\b", normalized
+    ):
+        return "review"
+    if re.search(r"\b(?:organize|organise|sort|categorize|categorise|label)\b", normalized):
+        return "organize"
+    if re.search(r"\b(?:draft|compose|write|send)\b", normalized) or re.search(
+        r"(?:^|\b(?:please|can you|could you)\s+)email\s+(?:me|[\w.+-]+@|[a-z]+)", normalized
+    ):
+        return "compose"
+    if re.search(r"\b(?:find|search|read|show|look for|open)\b", normalized):
+        return "find"
+    return None
+
+
+def is_pdf_email_request(text: str) -> bool:
+    normalized = text.lower().replace("’", "'")
+    return bool(
+        re.search(r"\bpdf\b", normalized)
+        and re.search(r"\b(?:send|email|mail)\b", normalized)
+        and not re.search(r"\b(?:do not|don't|never|delete|trash)\b", normalized)
+    )
 
 
 class CoreDisplay(QWidget):
@@ -275,7 +348,11 @@ class AssistantWorker(QThread):
     model_checked = pyqtSignal()
     audio_level = pyqtSignal(float)
     connect_requested = pyqtSignal()
+    gmail_tools_requested = pyqtSignal(str)
+    gmail_request_details = pyqtSignal(str)
+    pdf_email_requested = pyqtSignal(str)
     agent_state = pyqtSignal(str, bool)
+    link_requested = pyqtSignal(str, str)
 
     def __init__(self, client, mode: str, whisper_path: str, text: str = "", agents=(),
                  end_silence_seconds: float = CONVERSATION_SILENCE_SECONDS,
@@ -297,12 +374,15 @@ class AssistantWorker(QThread):
 
     def run(self):
         try:
+            if self.mode == "presentation":
+                self.run_presentation()
+                return
             if self.mode == "connect_gmail":
                 self.status_changed.emit("Waiting for Google authorization")
                 gmail.connect(self.text)
                 self.message.emit(
-                    "System", "Gmail connected with modify permission. Icewolf currently "
-                    "provides inbox reports only."
+                    "System", "Gmail connected with modify permission. Open Gmail tools to "
+                    "review mail, prepare messages, and approve changes."
                 )
                 return
             if self.mode == "gmail":
@@ -315,12 +395,19 @@ class AssistantWorker(QThread):
                     speaker.level_callback = self.audio_level.emit
                     speaker.say(report.speech, stop_event=self.stop_event)
                 return
-            self.status_changed.emit("Connecting to local model")
-            self.client.check_model()
-            self.model_checked.emit()
+            gmail_text = (self.mode == "text" and (
+                is_inbox_report_request(self.text) or gmail_tools_action(self.text)
+                or re.search(r"\b(?:gmail|e-?mails?|inbox)\b", self.text, re.I)
+            ))
+            if not gmail_text:
+                self.status_changed.emit("Connecting to local model")
+                self.client.check_model()
+                self.model_checked.emit()
             if self.stop_event.is_set():
                 return
-            if self.mode == "text" and self.language != "English":
+            if (self.mode == "text" and self.language != "English"
+                    and not (gmail_tools_action(self.text) or is_inbox_report_request(self.text)
+                             or re.search(r"\b(?:gmail|e-?mails?|inbox)\b", self.text, re.I))):
                 self.status_changed.emit("Thinking")
                 response = self.client.reply(self.text, language=self.language)
                 if not self.stop_event.is_set():
@@ -348,7 +435,10 @@ class AssistantWorker(QThread):
             if self.mode != "resume_wake":
                 self.status_changed.emit("Preparing wake phrase detection")
                 wake = IcewolfPhraseListener(
-                    voice, inline_request_matcher=is_inbox_report_request,
+                    voice, inline_request_matcher=lambda text: (
+                        is_inbox_report_request(text) or is_pdf_email_request(text)
+                        or gmail_tools_action(text) is not None
+                    ),
                     end_silence_seconds=self.end_silence_seconds,
                 )
                 try:
@@ -395,6 +485,88 @@ class AssistantWorker(QThread):
         except Exception as exc:
             self.failed.emit(f"{type(exc).__name__}: {exc}")
 
+    def run_presentation(self):
+        import numpy as np
+
+        self.status_changed.emit("Loading speech recognition for recording")
+        voice = VoicePipeline(Path(self.whisper_path), speak=False)
+        self.client.check_model()
+        self.model_checked.emit()
+        speaker = create_speaker()
+        speaker.level_callback = self.audio_level.emit
+        audio_queue = queue.Queue(maxsize=30)
+        overflow = threading.Event()
+        self.presentation_conversation = False
+        self.presentation_seen = set()
+        previous = None
+
+        def capture(indata, frames, time_info, status):
+            if status:
+                overflow.set()
+            try:
+                audio_queue.put_nowait(indata.copy())
+            except queue.Full:
+                overflow.set()
+
+        try:
+            while not self.stop_event.is_set():
+                if self.presentation_conversation:
+                    self.status_changed.emit("Recording mode — conversation demo")
+                    with voice.sd.InputStream(samplerate=SAMPLE_RATE, channels=1, dtype="float32") as stream:
+                        audio = voice._record_until_silence(
+                            CONVERSATION_MAX_SECONDS, 0.01, "silero", 0.5, stream,
+                            self.stop_event, wait_for_speech=True,
+                            end_silence_seconds=self.end_silence_seconds, fail_on_limit=True,
+                        )
+                    if audio is not None and not self.stop_event.is_set():
+                        self.handle_presentation_transcript(voice.transcribe(audio), speaker)
+                    continue
+                while not audio_queue.empty():
+                    audio_queue.get_nowait()
+                previous = None
+                self.status_changed.emit("Recording mode — listening for narration")
+                with voice.sd.InputStream(samplerate=SAMPLE_RATE, channels=1, dtype="float32",
+                                          blocksize=SAMPLE_RATE * 3, callback=capture):
+                    while not self.stop_event.is_set() and not self.presentation_conversation:
+                        if overflow.is_set():
+                            raise RuntimeError(
+                                "Recording audio could not be processed fast enough. "
+                                "Stop and retry with a smaller speech model."
+                            )
+                        try:
+                            chunk = audio_queue.get(timeout=0.2)
+                        except queue.Empty:
+                            continue
+                        audio = np.concatenate((previous[-SAMPLE_RATE:], chunk)) if previous is not None else chunk
+                        previous = chunk
+                        text = voice.transcribe(audio)
+                        if text and not self.stop_event.is_set():
+                            self.handle_presentation_transcript(text, speaker)
+        except SpeechTooLong as exc:
+            raise RuntimeError("Conversation request was too long; recording mode stopped.") from exc
+        except (OSError, ValueError, voice.sd.PortAudioError) as exc:
+            raise RuntimeError(f"Microphone recording failed: {exc}") from exc
+
+    def handle_presentation_transcript(self, text: str, speaker):
+        normalized = re.sub(r"[^a-z0-9]+", " ", text.lower().replace("'", "").replace("’", "")).strip()
+        if "now lets have a conversation" in normalized:
+            self.presentation_conversation = True
+            self.status_changed.emit("Recording mode — conversation demo")
+            return
+        if "that was our conversation demo" in normalized:
+            self.presentation_conversation = False
+            self.status_changed.emit("Recording mode — listening for narration")
+            return
+        if self.presentation_conversation:
+            self.handle_transcript(text, speaker)
+            return
+        for cue, command in PRESENTATION_CUES:
+            if cue in normalized and cue not in self.presentation_seen:
+                self.presentation_seen.add(cue)
+                title, url = PRESENTATION_LINKS[command]
+                self.message.emit("Icewolf", f"{title}: {url}")
+                self.link_requested.emit(title, url)
+
     def handle_transcript(self, text: str, speaker):
         if not text:
             self.message.emit("System", "No speech recognized.")
@@ -408,11 +580,19 @@ class AssistantWorker(QThread):
         normalized = " ".join(text.lower().strip(" .?!").split())
         if normalized in ("show project links", "show the project links"):
             self.message.emit("Icewolf", PROJECT_LINKS)
+            self.link_requested.emit("Project repositories", PROJECT_LINKS)
             self.status_changed.emit("Speaking")
             speaker.say(
                 "I have displayed the Icewolf and Jarvis repository links in the conversation.",
                 stop_event=self.stop_event,
             )
+            return
+        if normalized in PRESENTATION_LINKS:
+            title, url = PRESENTATION_LINKS[normalized]
+            self.message.emit("Icewolf", f"{title}: {url}")
+            self.link_requested.emit(title, url)
+            self.status_changed.emit("Speaking")
+            speaker.say(f"I have displayed the {title} link.", stop_event=self.stop_event)
             return
         repo_request = github_repo.extract_repository_request(text)
         if repo_request:
@@ -507,6 +687,11 @@ class AssistantWorker(QThread):
             self.status_changed.emit("Speaking")
             speaker.say(response, stop_event=self.stop_event)
             return
+        if is_pdf_email_request(text):
+            self.message.emit("Icewolf", "Opening a PDF and email preview. Nothing will be sent without your approval.")
+            self.pdf_email_requested.emit(text)
+            self.stop_event.set()
+            return
         if is_inbox_report_request(text):
             self.status_changed.emit("Reading Gmail inbox")
             report = gmail.inbox_report()
@@ -515,10 +700,26 @@ class AssistantWorker(QThread):
                 self.status_changed.emit("Speaking")
                 speaker.say(report.speech, stop_event=self.stop_event)
             return
-        if re.search(r"\b(?:gmail|e-?mails?|mail|inbox)\b", normalized):
+        action = gmail_tools_action(text)
+        if action is not None:
+            response = ("I'll open Gmail tools so you can select the message to reply to."
+                        if action == "reply" else
+                        "I'll open Gmail tools for you to review and approve the next steps.")
+            self.message.emit("Icewolf", response)
+            self.status_changed.emit("Speaking")
+            speaker.say(response, stop_event=self.stop_event)
+            if self.stop_event.is_set():
+                return
+            self.gmail_request_details.emit(text)
+            self.gmail_tools_requested.emit(action)
+            self.stop_event.set()
+            return
+        if re.search(r"\b(?:gmail|e-?mails?|mail|inbox)\b", normalized) or re.search(
+            r"\b(?:delete|trash)\s+(?:that|it|this|the message)\b", normalized
+        ):
             response = ("That specific email request is not available. "
-                        "I can give you a report of your latest inbox messages. "
-                        "Drafting, sending, and changing messages are not available yet.")
+                        "I can report recent messages or open Gmail tools to review, draft, "
+                        "send, and organize with your approval.")
             self.message.emit("Icewolf", response)
             speaker.say(response, stop_event=self.stop_event)
             return
@@ -531,6 +732,43 @@ class AssistantWorker(QThread):
         speaker.say(response, stop_event=self.stop_event)
 
 
+class LinkDisplay(QWidget):
+    def __init__(self):
+        super().__init__(flags=Qt.WindowType.Tool | Qt.WindowType.FramelessWindowHint |
+                         Qt.WindowType.WindowStaysOnTopHint | Qt.WindowType.WindowDoesNotAcceptFocus)
+        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
+        self.setStyleSheet(
+            "QWidget { background: #0a1825; color: #eff8fc; }"
+            "QLabel { color: #71e9ee; font: bold 22px 'Segoe UI'; }"
+            "QPlainTextEdit { background: #0a1825; color: white; border: 0;"
+            " font: 20px 'Segoe UI'; }"
+        )
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(24, 20, 24, 20)
+        self.heading = QLabel()
+        self.heading.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(self.heading)
+        self.links = QPlainTextEdit()
+        self.links.setReadOnly(True)
+        self.links.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.links.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.links.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        layout.addWidget(self.links)
+        self.timer = QTimer(self)
+        self.timer.setSingleShot(True)
+        self.timer.timeout.connect(self.hide)
+
+    def show_links(self, title: str, links: str, screen):
+        self.heading.setText(title)
+        self.links.setPlainText(links)
+        area = screen.availableGeometry()
+        self.resize(min(1100, area.width() - 40), min(250, area.height() - 40))
+        self.move(area.center() - self.rect().center())
+        self.show()
+        self.raise_()
+        self.timer.start(LINK_DISPLAY_MS)
+
+
 class IcewolfWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -539,8 +777,13 @@ class IcewolfWindow(QMainWindow):
         self.client_model = None
         self.closing = False
         self.pending_connect = False
+        self.pending_gmail_tools = None
+        self.pending_gmail_request = ""
+        self.current_gmail_message = None
+        self.pending_pdf_email = None
         self.pending_repo = False
         self.resume_after_repo = False
+        self.link_display = LinkDisplay()
         self.agents = set()
         self.agent_store = AgentStore(data_root() / "data" / "agents.sqlite3")
         self.custom_agents = []
@@ -679,7 +922,7 @@ class IcewolfWindow(QMainWindow):
         self.connect_gmail_button.clicked.connect(self.connect_gmail)
         settings_layout.addWidget(self.connect_gmail_button)
         settings_note = QLabel(
-            "Gmail requests modify permission online; Icewolf currently reads inbox reports only. "
+            "Gmail requests modify permission online; sending and organizing require approval. "
             "Speech uses local Kokoro Adam."
         )
         settings_note.setWordWrap(True)
@@ -698,6 +941,12 @@ class IcewolfWindow(QMainWindow):
         self.wake_button.setObjectName("secondary")
         self.wake_button.clicked.connect(self.start_wake)
         side.addWidget(self.wake_button)
+        self.presentation_button = QPushButton("Start recording mode")
+        self.presentation_button.setToolTip(
+            "Listen locally for script phrases and display their links. Stop with Stop / cancel."
+        )
+        self.presentation_button.clicked.connect(lambda: self.start_worker("presentation"))
+        side.addWidget(self.presentation_button)
         self.stop_button = QPushButton("Stop / cancel")
         self.stop_button.clicked.connect(self.stop_worker)
         self.stop_button.setEnabled(False)
@@ -819,6 +1068,12 @@ class IcewolfWindow(QMainWindow):
         self.repo_button.setToolTip("Paste a public GitHub repository link and question.")
         self.repo_button.clicked.connect(self.open_repo_dialog)
         row.addWidget(self.repo_button)
+        self.gmail_tools_button = QPushButton("Gmail tools")
+        self.gmail_tools_button.setToolTip(
+            "Stop listening and open Gmail tools. Restart listening when finished."
+        )
+        self.gmail_tools_button.clicked.connect(lambda: self.open_gmail_tools())
+        row.addWidget(self.gmail_tools_button)
         conversation_layout.addLayout(row)
         main.addWidget(conversation, 2)
         agent_panel, agent_layout = self.make_panel("ATTACHED AGENTS")
@@ -1189,6 +1444,14 @@ class IcewolfWindow(QMainWindow):
     def append_message(self, role: str, text: str):
         self.log.appendPlainText(f"{role}: {text}\n")
 
+    def show_presentation_link(self, title: str, links: str):
+        window = self.avatar_window if self.avatar_window.isVisible() else self
+        screen = QApplication.screenAt(window.frameGeometry().center()) or QApplication.primaryScreen()
+        if screen is None:
+            self.append_message("Error", "Unable to display the link: no screen is available.")
+            return
+        self.link_display.show_links(title, links, screen)
+
     def open_repo_dialog(self):
         if self.language_input.currentText() != "English":
             self.set_status("Error — repository access currently requires English; change it in Configuration")
@@ -1269,12 +1532,16 @@ class IcewolfWindow(QMainWindow):
 
     def set_busy(self, busy: bool):
         for control in (self.model_input, self.language_input, self.whisper_input, self.browse_button, self.speech_pause,
-                        self.wake_button, self.send_button,
-                        self.text_input, self.clear_button, self.connect_gmail_button,
+                        self.wake_button, self.presentation_button, self.send_button,
+                        self.text_input, self.clear_button, self.connect_gmail_button, self.gmail_tools_button,
                         self.agent_select, self.attach_button, self.create_agent_button,
                         self.add_material_button, self.manage_material_button):
             control.setEnabled(not busy)
         listening = busy and self.worker is not None and self.worker.mode in ("wake", "resume_wake")
+        gmail_listening = busy and self.worker is not None and self.worker.mode in (
+            "wake", "resume_wake", "presentation"
+        )
+        self.gmail_tools_button.setEnabled(not busy or gmail_listening)
         self.avatar_window.listen_button.setEnabled(not busy or listening)
         self.avatar_window.listen_button.setText("Stop" if listening else "Start listening")
         self.repo_button.setEnabled(not busy or listening)
@@ -1333,9 +1600,13 @@ class IcewolfWindow(QMainWindow):
             lambda: self.llm_status.setText(f"LLM: {model} checked")
         )
         self.worker.message.connect(self.append_message)
+        self.worker.link_requested.connect(self.show_presentation_link)
         self.worker.failed.connect(self.show_error)
         self.worker.audio_level.connect(self.set_audio_level)
         self.worker.connect_requested.connect(self.request_connect)
+        self.worker.gmail_tools_requested.connect(self.request_gmail_tools)
+        self.worker.gmail_request_details.connect(self.request_gmail_details)
+        self.worker.pdf_email_requested.connect(self.request_pdf_email)
         self.worker.agent_state.connect(self.update_agents)
         self.worker.finished.connect(self.worker_finished)
         self.set_busy(True)
@@ -1360,6 +1631,16 @@ class IcewolfWindow(QMainWindow):
         elif self.pending_connect:
             self.pending_connect = False
             self.connect_gmail()
+        elif self.pending_pdf_email is not None:
+            request = self.pending_pdf_email
+            self.pending_pdf_email = None
+            self.open_gmail_tools(pdf_request=request)
+        elif self.pending_gmail_tools is not None:
+            action = self.pending_gmail_tools
+            self.pending_gmail_tools = None
+            request = self.pending_gmail_request
+            self.pending_gmail_request = ""
+            self.open_gmail_tools(action, request=request)
         elif self.pending_repo:
             self.pending_repo = False
             self.open_repo_dialog()
@@ -1384,10 +1665,53 @@ class IcewolfWindow(QMainWindow):
             self, "Select Google OAuth desktop client JSON", "", "JSON files (*.json)"
         )
         if path:
+            self.current_gmail_message = None
             self.start_worker("connect_gmail", path)
 
     def check_gmail(self):
         self.start_worker("gmail")
+
+    def request_gmail_tools(self, action):
+        self.pending_gmail_tools = action
+
+    def request_gmail_details(self, request):
+        self.pending_gmail_request = request
+
+    def request_pdf_email(self, request):
+        self.pending_pdf_email = request
+
+    def open_gmail_tools(self, action="", pdf_request=None, request=""):
+        if self.worker is not None:
+            if self.worker.mode in ("wake", "resume_wake", "presentation"):
+                self.pending_gmail_tools = action
+                self.gmail_tools_button.setEnabled(False)
+                self.stop_worker()
+            return
+        model = self.model_input.currentText().strip()
+        try:
+            client = OllamaClient(model)
+        except ValueError as exc:
+            self.show_error(str(exc))
+            return
+        from .gmail_ui import GmailTools
+        dialog = GmailTools(client, self, selected_message=self.current_gmail_message)
+        dialog.message_selected.connect(self.remember_gmail_message)
+        if pdf_request is not None:
+            QTimer.singleShot(0, lambda: dialog.compose(None, pdf_request))
+        elif action == "review":
+            QTimer.singleShot(0, dialog.load_unread)
+        elif action in ("reply", "modify"):
+            QTimer.singleShot(0, lambda: dialog.start_request(action, request))
+        elif action in ("find", "bulk_read"):
+            QTimer.singleShot(0, lambda: dialog.start_request(action, request))
+        elif action == "organize":
+            QTimer.singleShot(0, lambda: dialog.load(False))
+        elif action == "compose":
+            QTimer.singleShot(0, lambda: dialog.compose(None, request=request))
+        dialog.exec()
+
+    def remember_gmail_message(self, message):
+        self.current_gmail_message = message
 
     def send_text(self):
         text = self.text_input.text().strip()
@@ -1421,6 +1745,8 @@ class IcewolfWindow(QMainWindow):
             event.ignore()
         else:
             self.monitor_timer.stop()
+            self.link_display.timer.stop()
+            self.link_display.close()
             self.avatar_window.hide()
             self.avatar_window.core.timer.stop()
             if self.tray is not None:

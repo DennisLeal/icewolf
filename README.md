@@ -26,6 +26,28 @@ In an English desktop conversation, say or type "show project links" to display
 both URLs in the Conversation window. This local command does not contact GitHub.
 The public GitHub README lookup is a separate online feature.
 
+In the current development source, English desktop conversations also support
+temporary, centered link displays. Say or type one of: "show icewolf release
+link", "show ollama download link", "show git download link", "show icewolf
+clone link", "show kokoro download link", "show icewolf repository link", or
+"show jarvis repository link". Each appears for 15 seconds and is also retained
+in the Conversation window. "Show project links" displays both repository
+links together. These commands do not fetch or open URLs. The Kokoro URL is the
+base used by the source-setup download commands, not a standalone download
+page. This display feature is not included in the published v0.2.0 installer.
+
+For the recording script, start the development desktop app, select English
+and a local Whisper model, and choose **Start recording mode**. While this
+mode is active, the microphone listens for the specific phrases in the script
+and silently displays their links in Conversation and briefly in the center
+of the screen. Say "Now let's have a conversation" to switch to the live
+conversation demo, wait for the status to change, and say "That was our
+conversation demo" to return to narration. Stop the microphone with
+**Stop / cancel**. Recording mode is opt-in and does not record video.
+Speech recognition and processing can delay or miss cues; check the status
+and rehearse before recording. This feature is not in the published v0.2.0
+installer.
+
 ### What's in 0.2.0
 
 - Per-user Windows installer, dashboard, Voice view, and desktop avatar mode.
@@ -36,10 +58,10 @@ The public GitHub README lookup is a separate online feature.
 - Experimental typed replies in Tagalog, Cebuano and Hiligaynon. Voice remains
   English-only, and model quality varies by language.
 
-The assistant cannot yet autonomously create PDFs, send or modify email, or
-execute arbitrary tasks. Broader Google account permissions alone do not add
-these capabilities: Icewolf currently implements inbox reports only, even
-though its Gmail authorization requests the broader `gmail.modify` scope.
+The development source includes approval-gated Gmail tools described below;
+the published v0.2.0 installer still provides inbox reports only. The development
+version can prepare a local-model-generated PDF for review and email approval;
+it cannot execute arbitrary tasks.
 
 ## Architecture and roadmap
 
@@ -506,17 +528,16 @@ Gmail access contacts Google over the internet and is separate from the local
 LLM. Icewolf requests `https://www.googleapis.com/auth/gmail.modify`, a
 restricted Google scope that permits reading, composing, sending, and
 modifying Gmail messages, but not immediate permanent deletion bypassing the
-trash. Icewolf currently uses this access only for inbox reports; it cannot
-create drafts or send email. A report contains the latest five inbox senders,
-subjects and previews, not a count of the complete inbox. Icewolf displays the
-previews but speaks only shortened sender names and subjects, followed by a
-question about preparing a reply or organizing messages. It cannot itself send,
-trash, or label messages, and the question does not grant those capabilities.
-Make sure your
+trash. The published v0.2.0 installer uses it only for inbox reports. In the
+development source, **Gmail tools** can also review unread messages, save
+drafts, send or reply with approval, and propose inbox labels and optional
+archiving. They can also show full message text or a thread and apply
+individual label, read/unread, archive, and star changes after confirmation.
+There is no delete or trash operation. Make sure your
 speakers and screen are private. **Stop / cancel** interrupts desktop playback;
 an in-progress synthesis or other operation may still take time to finish. It does
-not yet understand arbitrary email requests, monitor automatically, or summarize
-complete message bodies.
+not understand arbitrary email requests, monitor automatically, or read complete
+message bodies for classification or replies.
 
 To authorize your own account:
 
@@ -531,7 +552,7 @@ To authorize your own account:
    Gmail**, or say **"connect Gmail"** after the wake prompt. Select the JSON
    file and review and authorize Gmail modify access in the browser. The credential is stored
    in Windows Credential Manager under `Icewolf Gmail`.
-5. Say or type **“check my Gmail”** or **“can you check my email?”** to hear
+5. Say or type **“check my Gmail”** or **“read the first five emails in my inbox”** to hear
    the latest inbox report. The desktop also accepts phrases such as **“check
    my email for me”**, **“do I have any new emails?”**, and **“Hey Icewolf,
    check my email”** in one utterance when waking. These all report the latest
@@ -541,10 +562,82 @@ To authorize your own account:
    configured conversation pause and has a 30-second limit when capturing the
    wake phrase and request together. If transcription misses the phrase, wake
    Icewolf first and speak the request after the greeting.
-   Only supported general inbox requests are routed;
-   filtering, unread counts, drafting, sending, and changes are not available.
    Google may require reauthorization when test credentials expire. Revoke
    access from your Google Account's third-party connections if desired.
+
+In the development desktop, select **Gmail tools**, or ask to "review unread
+emails", "organize my inbox", or "compose a Gmail message". Gmail tools can
+also be opened while listening or in recording mode: Icewolf
+stops the current microphone session first. Start listening or recording mode
+again after closing the tools.
+
+Voice or typed requests open the corresponding Gmail screen. For example, ask
+"find email from person@example.com", "reply to that and say thank you", or
+"send an email to person@example.com about our meeting". Icewolf passes your
+request to the draft generator and fills an explicit email address when present;
+review and complete the recipient, subject and body before saving or sending.
+Draft generation requires the selected local Ollama model.
+Choose a message in Gmail tools to make it the current message for this app
+session. "Reply to that", "mark it unread", "archive it", and "star it" refer
+to that selection; if none is selected, choose a message first. Reconnecting
+clears the selection. Search supports Gmail query syntax and excludes Spam and
+Trash by default. Names are not resolved to email addresses automatically.
+For "mark all inbox messages as read", Icewolf lists the currently unread inbox
+messages and requires confirmation before changing them. Mail arriving after the
+preview is not included. Other bulk requests are not supported.
+English voice commands are available during a normal
+listening session; recording mode must first be switched to its conversation
+demo. Whisper transcription may mishear a request; check the Conversation
+panel to see what was recognized.
+
+Reviewing
+unread messages scans all pages outside Spam and Trash and classifies sender,
+subject, and preview locally using the selected Ollama model. Jobs, bills,
+subscriptions, Netflix, LinkedIn connection requests, AI and uncertain items
+are shown; model-classified marketing and accepted invitations are initially
+hidden but can be displayed using the checkbox. No message is marked read.
+Classification is imperfect and uses snippets, not full messages; check the
+hidden items before relying on it. It may take time for large mailboxes.
+
+**All mail** loads all accessible messages, excluding Spam and Trash. Select one
+and use **Read selected** or **Read thread** to see its text. **Modify selected**
+allows adding or removing an existing user label, marking read or unread,
+archiving, or starring/un-starring one selected message; review the target and
+change in the confirmation before applying it.
+
+Work/family alerts are **not implemented**: there is no opt-in control, criteria
+configuration, polling scheduler, duplicate-prevention state, or notification
+delivery. Reliable local alerts would require those components, the desktop
+application to remain running, a network connection, valid Gmail authorization,
+and recovery after disconnects; no alert is generated while Icewolf is closed.
+Google recommends polling/synchronization for user-owned devices. Gmail push
+instead requires a Google Cloud Pub/Sub topic and subscription, Gmail publish
+permission, and renewal of the mailbox watch at least every seven days; it may
+also involve cloud charges. See the [Gmail push guide](https://developers.google.com/workspace/gmail/api/guides/push)
+and [sync guide](https://developers.google.com/workspace/gmail/api/guides/sync).
+
+**Plan inbox organization** classifies the inbox and shows proposed labels.
+Check the messages to change, optionally select archive, and confirm the exact
+preview. Archive removes the Inbox label; it does not delete mail. Failures
+can leave a partial result, so check Gmail before retrying. Compose and reply
+let you enter text or generate a local draft; saving a draft creates a Gmail
+draft; reply drafts require confirmation of the original message and draft.
+Sending always requires confirmation showing the recipient, subject
+and body. If delivery fails or is uncertain, check Sent before retrying.
+Email content is untrusted and may mislead the model; review every draft and
+classification. The tool does not act in the background, and its actions have
+not been verified against a live Gmail account.
+
+For a PDF request, in an English conversation say or type, for example,
+"Create a PDF of popular salads and send it to me." Icewolf opens Gmail tools,
+generates editable document text locally, and prepares a PDF attachment.
+"To me" fills the connected Gmail address; check it and the entire document
+before approving. You can edit the recipient, subject, email and document before
+selecting **Review and send**. Nothing is sent without confirmation. The PDF
+exists as an in-memory attachment, not a saved local file. Content is generated
+without live research and may be incorrect or incomplete. This is a focused
+PDF-and-email workflow, not a general autonomous task executor. Restart the
+development app to load changes; it is not in the published installer.
 
 If Icewolf reports insufficient permission, or you connected before the
 scope changed from `gmail.readonly`, open **Configuration**, select **Connect
