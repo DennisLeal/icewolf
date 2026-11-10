@@ -16,7 +16,13 @@ SYSTEM_PROMPT = (
     "Use plain language and avoid unnecessary filler or decorative formatting. "
     "Ask for clarification when needed. Acknowledge uncertainty. "
     "Do not claim to have performed actions or accessed information that you have not. "
-    "You have no access to live information or tools unless explicitly provided."
+    "Icewolf's desktop can route certain requests to Gmail, public GitHub and YouTube "
+    "integrations, but they require connectivity and explicit routing; do not claim "
+    "to have used them unless a tool result is provided. Gmail must be connected and "
+    "can read, compose, send, reply and organize mail; sending and organizing do not "
+    "require an extra confirmation, but moving to Trash does. Gmail attachments and "
+    "background inbox monitoring are not supported. The desktop has document-backed "
+    "local advisor agents. Features depend on the interface and setup."
 )
 MAX_RESPONSE_BYTES = 4 * 1024 * 1024
 RESPONSE_LANGUAGES = ("English", "Tagalog", "Cebuano", "Hiligaynon")
@@ -68,6 +74,42 @@ class OllamaClient:
     def _post(self, path: str, payload: dict) -> dict:
         return self._request("POST", path, payload)
 
+    def _post_stream(self, path: str, payload: dict):
+        """Yield parsed JSON objects from an Ollama streaming NDJSON response."""
+        connection = http.client.HTTPConnection("127.0.0.1", self.port, timeout=self.timeout)
+        try:
+            connection.request(
+                method="POST",
+                url=path,
+                body=json.dumps(payload).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+            )
+            response = connection.getresponse()
+            body = response.read(MAX_RESPONSE_BYTES + 1)
+            if len(body) > MAX_RESPONSE_BYTES:
+                raise RuntimeError("Ollama returned an unexpectedly large response.")
+            if response.status != 200:
+                raise RuntimeError(
+                    f"Local LLM returned HTTP {response.status}: "
+                    f"{body.decode('utf-8', errors='replace')}"
+                )
+            for line in body.decode("utf-8", errors="replace").splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    import json as _json
+                    yield _json.loads(line)
+                except (ValueError, UnicodeDecodeError):
+                    continue
+        except (OSError, socket.timeout, http.client.HTTPException) as exc:
+            raise RuntimeError(
+                f"Could not reach the local LLM at 127.0.0.1:{self.port}. "
+                "Check that the configured local service is running."
+            ) from exc
+        finally:
+            connection.close()
+
     def check_model(self) -> None:
         info = self._post("/api/show", {"model": self.model})
         if info.get("remote_host") or info.get("remote_model"):
@@ -95,6 +137,44 @@ class OllamaClient:
             messages[1:] + [{"role": "assistant", "content": content}]
         )[-20:]
         return content
+
+    def reply_stream(self, text: str, language: str = "English"):
+        """Stream assistant response chunks from Ollama as they are generated.
+
+        Yields text deltas. The full response is appended to conversation history
+        once streaming completes.
+        """
+        if language not in RESPONSE_LANGUAGES:
+            raise ValueError("Unsupported response language.")
+        messages = self.messages + [{"role": "user", "content": text}]
+        request_messages = list(messages)
+        if language != "English":
+            request_messages[0] = {
+                "role": "system",
+                "content": SYSTEM_PROMPT + f" Respond in {language}.",
+            }
+        full = []
+        for data in self._post_stream(
+            "/api/chat",
+            {
+                "model": self.model,
+                "messages": request_messages,
+                "stream": True,
+            },
+        ):
+            message = data.get("message")
+            if not isinstance(message, dict):
+                continue
+            content = message.get("content")
+            if isinstance(content, str) and content:
+                full.append(content)
+                yield content
+        if not full:
+            raise RuntimeError("Ollama returned an empty or invalid assistant response.")
+        content = "".join(full).strip()
+        self.messages = [messages[0]] + (
+            messages[1:] + [{"role": "assistant", "content": content}]
+        )[-20:]
 
     def clear_history(self) -> None:
         self.messages = [{"role": "system", "content": SYSTEM_PROMPT}]

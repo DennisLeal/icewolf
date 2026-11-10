@@ -47,161 +47,11 @@ class GmailTests(unittest.TestCase):
         self.assertNotIn("invited", result.speech)
         self.assertNotIn("&#39;", result.speech)
         self.assertIn("Number 1 is from Sender, about Meeting.", result.speech)
-        self.assertIn("Gmail tools", result.speech)
+        self.assertIn("Ask me to read or manage", result.speech)
         messages.list.assert_called_once_with(userId="me", labelIds=["INBOX"], maxResults=5)
         messages.get.assert_called_once()
         http.close.assert_called_once()
 
-    def test_voice_gmail_request_uses_real_inbox_not_llm(self):
-        client = MagicMock()
-        speaker = MagicMock()
-        worker = AssistantWorker(client, "text", "", "")
-        report = gmail.InboxReport("Full inbox report", "Short spoken report")
-        with patch("icewolf.desktop.gmail.inbox_report", return_value=report):
-            worker.respond("Check my Gmail.", speaker)
-        client.reply.assert_not_called()
-        speaker.say.assert_called_once_with("Short spoken report", stop_event=worker.stop_event)
-
-    def test_natural_inbox_requests_are_routed_to_gmail(self):
-        requests = (
-            "Can you check my email?",
-            "Please check my emails.",
-            "Could you check my Gmail please?",
-            "Icewolf, can you check my inbox?",
-            "Check my e-mail.",
-            "Read my emails.",
-            "What's in my inbox?",
-            "What's going on in my Gmail?",
-            "Report my Gmail",
-            "Check my Gmail.",
-            "Give me an email report.",
-            "Hey icewolf check my email",
-            "Hey, Icewolf, check my email.",
-            "Hey Icewolf, can you check my email for me please?",
-            "Check my email for me",
-            "Could you check my latest emails right now?",
-            "Please check if I have any new emails.",
-            "Do I have any new email?",
-            "Are there any new messages in my inbox?",
-            "What new emails do I have?",
-            "Check my mail",
-            "Can you check my connected email account?",
-            "Read the first five emails in my inbox.",
-            "Please read the first 5 emails in my inbox out loud.",
-            "Read my latest five messages from my Gmail.",
-            "Read out loud the first five emails in my inbox.",
-            "Read me my first five emails.",
-            "Hey Icewolf, read the first five emails in my inbox.",
-        )
-        report = gmail.InboxReport("Full inbox report", "Short spoken report")
-        for request in requests:
-            with self.subTest(request=request):
-                client, speaker = MagicMock(), MagicMock()
-                worker = AssistantWorker(client, "text", "")
-                with patch("icewolf.desktop.gmail.inbox_report", return_value=report) as inbox:
-                    worker.handle_transcript(request, speaker)
-                inbox.assert_called_once_with()
-                client.reply.assert_not_called()
-                speaker.say.assert_called_once_with(report.speech, stop_event=worker.stop_event)
-
-    def test_specific_or_negated_mail_requests_do_not_fetch_or_claim_success(self):
-        requests = (
-            "Don't check my email",
-            "Check my email from Alice",
-            "How many unread emails do I have?",
-            "Delete my email",
-            "Hey Icewolf check my email and delete it",
-            "Don't send my email",
-            "Don't check if I have any new emails",
-            "Check my email from Alice please",
-            "Check my work email",
-            "Check my other email account",
-            "Do I have any new emails from Alice?",
-            "Can you check my Outlook email?",
-        )
-        for request in requests:
-            with self.subTest(request=request):
-                client, speaker = MagicMock(), MagicMock()
-                worker = AssistantWorker(client, "text", "")
-                with patch("icewolf.desktop.gmail.inbox_report") as inbox:
-                    worker.respond(request, speaker)
-                inbox.assert_not_called()
-                client.reply.assert_not_called()
-                self.assertIn("not available", speaker.say.call_args.args[0])
-
-    def test_inbox_request_in_active_voice_conversation(self):
-        client, speaker, voice, stream, wake = (MagicMock() for _ in range(5))
-        stream.__enter__.return_value = stream
-        voice.sd = SimpleNamespace(InputStream=MagicMock(return_value=stream),
-                                   PortAudioError=OSError)
-        voice.transcribe.return_value = "Can you check my email?"
-        wake.wait.return_value = True
-        worker = AssistantWorker(client, "wake", "whisper")
-        report = gmail.InboxReport("Full inbox report", "Short spoken report")
-        messages, errors = [], []
-        worker.message.connect(lambda role, text: messages.append((role, text)))
-        worker.failed.connect(errors.append)
-        def capture(*args, **kwargs):
-            if voice._record_until_silence.call_count == 2:
-                worker.stop()
-                return None
-            return "audio"
-        voice._record_until_silence.side_effect = capture
-        with patch("icewolf.desktop.create_speaker", return_value=speaker), \
-             patch("icewolf.desktop.VoicePipeline", return_value=voice), \
-             patch("icewolf.desktop.IcewolfPhraseListener", return_value=wake), \
-             patch("icewolf.desktop.gmail.inbox_report", return_value=report) as inbox:
-            worker.run()
-        self.assertEqual(errors, [])
-        wake.wait.assert_called_once()
-        inbox.assert_called_once()
-        client.reply.assert_not_called()
-        self.assertIn(("Icewolf", report.display), messages)
-        self.assertEqual(speaker.say.call_args_list[-1].args[0], report.speech)
-        self.assertEqual(voice._record_until_silence.call_count, 2)
-
-    def test_wake_phrase_and_inbox_request_together_use_gmail(self):
-        client, speaker, voice, stream = (MagicMock() for _ in range(4))
-        stream.__enter__.return_value = stream
-        voice.sd = SimpleNamespace(InputStream=MagicMock(return_value=stream),
-                                   PortAudioError=OSError)
-        voice.model.transcribe.return_value = (
-            iter([SimpleNamespace(text="Hey Icewolf, check my email.")]), None
-        )
-        worker = AssistantWorker(client, "wake", "whisper")
-        report = gmail.InboxReport("Full inbox report", "Short spoken report")
-        messages, errors = [], []
-        worker.message.connect(lambda role, text: messages.append((role, text)))
-        worker.failed.connect(errors.append)
-        def capture(*args, **kwargs):
-            if voice._record_until_silence.call_count == 2:
-                worker.stop()
-                return None
-            return MagicMock()
-        voice._record_until_silence.side_effect = capture
-        with patch("icewolf.desktop.create_speaker", return_value=speaker), \
-             patch("icewolf.desktop.VoicePipeline", return_value=voice), \
-             patch("icewolf.desktop.gmail.inbox_report", return_value=report) as inbox:
-            worker.run()
-        self.assertEqual(errors, [])
-        inbox.assert_called_once_with()
-        client.reply.assert_not_called()
-        self.assertIn(("You", "check my email."), messages)
-        speaker.say.assert_called_once_with(report.speech, stop_event=worker.stop_event)
-        self.assertEqual(voice._record_until_silence.call_count, 2)
-
-    def test_inbox_error_is_reported_without_llm_fallback(self):
-        client, speaker = MagicMock(), MagicMock()
-        worker = AssistantWorker(client, "text", "", "Can you check my email?")
-        errors = []
-        worker.failed.connect(errors.append)
-        with patch("icewolf.desktop.create_speaker", return_value=speaker), \
-             patch("icewolf.desktop.gmail.inbox_report",
-                   side_effect=RuntimeError("Gmail authorization unavailable")):
-            worker.run()
-        self.assertEqual(errors, ["RuntimeError: Gmail authorization unavailable"])
-        client.reply.assert_not_called()
-        speaker.say.assert_not_called()
 
     def test_button_and_voice_requests_use_same_spoken_report(self):
         report = gmail.InboxReport("Full inbox report", "Short spoken report")
@@ -219,45 +69,6 @@ class GmailTests(unittest.TestCase):
         self.assertEqual(gmail._clean("You&#39;re welcome", 100), "You're welcome")
         self.assertLessEqual(len(gmail._clean("x" * 1000, 70)), 70)
 
-    def test_send_request_opens_tools_without_sending(self):
-        client = MagicMock()
-        speaker = MagicMock()
-        worker = AssistantWorker(client, "text", "", "")
-        requested = []
-        worker.gmail_tools_requested.connect(requested.append)
-        worker.respond("Send a Gmail message", speaker)
-        client.reply.assert_not_called()
-        self.assertEqual(requested, ["compose"])
-        self.assertTrue(worker.stop_event.is_set())
-        self.assertIn("review and approve", speaker.say.call_args.args[0])
-
-    def test_natural_gmail_actions_speak_and_open_requested_tool(self):
-        examples = {
-            "Write an email for me": "compose",
-            "Please organize my emails": "organize",
-            "Review all my unread messages": "review",
-            "Reply to this email": "reply",
-            "Send a Gmail message": "compose",
-        }
-        for request, expected in examples.items():
-            with self.subTest(request=request):
-                client, speaker = MagicMock(), MagicMock()
-                worker = AssistantWorker(client, "text", "")
-                requested = []
-                worker.gmail_tools_requested.connect(requested.append)
-                worker.handle_transcript(request, speaker)
-                self.assertEqual(requested, [expected])
-                speaker.say.assert_called_once()
-                client.reply.assert_not_called()
-
-    def test_cancel_during_gmail_handoff_does_not_open_tools(self):
-        worker = AssistantWorker(MagicMock(), "text", "")
-        speaker = MagicMock()
-        speaker.say.side_effect = lambda *args, **kwargs: worker.stop()
-        requested = []
-        worker.gmail_tools_requested.connect(requested.append)
-        worker.respond("Write an email", speaker)
-        self.assertEqual(requested, [])
 
     def test_unread_listing_paginates_without_modifying_messages(self):
         messages = MagicMock()
@@ -305,14 +116,6 @@ class GmailTests(unittest.TestCase):
         service.users.return_value.messages.return_value.delete.assert_not_called()
         service.users.return_value.messages.return_value.trash.assert_not_called()
 
-    def test_pdf_email_request_is_routed_without_sending(self):
-        worker = AssistantWorker(MagicMock(), "text", "")
-        requests = []
-        worker.pdf_email_requested.connect(requests.append)
-        request = "Create a PDF file with popular salads and send it over to me."
-        worker.respond(request, MagicMock())
-        self.assertEqual(requests, [request])
-        self.assertTrue(worker.stop_event.is_set())
 
     def test_pdf_is_attached_to_message(self):
         import base64
@@ -419,35 +222,6 @@ class GmailTests(unittest.TestCase):
         users.messages.return_value.trash.assert_not_called()
         users.messages.return_value.delete.assert_not_called()
 
-    def test_ambiguous_reply_and_modify_do_not_fall_through_to_model(self):
-        for request, expected in (("Reply to that", "reply"), ("Mark it unread", "modify"),
-                                  ("Remove label from that email", "modify")):
-            with self.subTest(request=request):
-                client = MagicMock()
-                worker = AssistantWorker(client, "text", "")
-                requested = []
-                worker.gmail_tools_requested.connect(requested.append)
-                worker.respond(request, MagicMock())
-                self.assertEqual(requested, [expected])
-                client.reply.assert_not_called()
-
-    def test_search_request_is_forwarded_without_claiming_read(self):
-        worker = AssistantWorker(MagicMock(), "text", "")
-        requests, details = [], []
-        worker.gmail_tools_requested.connect(requests.append)
-        worker.gmail_request_details.connect(details.append)
-        worker.respond("Read the email from Bob", MagicMock())
-        self.assertEqual(requests, ["find"])
-        self.assertEqual(details, ["Read the email from Bob"])
-        worker.client.reply.assert_not_called()
-
-    def test_bulk_read_request_is_forwarded_for_approval(self):
-        worker = AssistantWorker(MagicMock(), "text", "")
-        requests = []
-        worker.gmail_tools_requested.connect(requests.append)
-        worker.respond("Mark all my inbox messages as read", MagicMock())
-        self.assertEqual(requests, ["bulk_read"])
-        worker.client.reply.assert_not_called()
 
     def test_query_is_used_for_search_and_paginated(self):
         from contextlib import nullcontext

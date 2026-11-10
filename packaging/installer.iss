@@ -28,7 +28,6 @@ Name: "migrate"; Description: "Copy existing project settings and agent material
 [Files]
 Source: "..\dist\Icewolf\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "..\README.md"; DestDir: "{app}"; Flags: ignoreversion
-Source: "..\ICEWOLF-DEMO-SCRIPT.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\models\kokoro\kokoro-v1.0.onnx"; DestDir: "{localappdata}\Icewolf\UserData\models\kokoro"; Flags: onlyifdoesntexist uninsneveruninstall
 Source: "..\models\kokoro\voices-v1.0.bin"; DestDir: "{localappdata}\Icewolf\UserData\models\kokoro"; Flags: onlyifdoesntexist uninsneveruninstall
 

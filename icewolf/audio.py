@@ -1,6 +1,7 @@
 """Push-to-talk recording, offline transcription, and system speech."""
 
 from pathlib import Path
+import re
 import sys
 from contextlib import nullcontext
 from collections import deque
@@ -241,23 +242,51 @@ class PiperSpeaker:
 
     def say(self, text: str, stop_event=None) -> None:
         try:
-            chunks = []
+            stream = None
             sample_rate = None
+            frame_size = None
+            lead_in_written = False
             for chunk in self.voice.synthesize(text, syn_config=self.synthesis_config):
                 if stop_event is not None and stop_event.is_set():
+                    if stream is not None:
+                        stream.abort()
                     return
                 if chunk.sample_width != 2 or chunk.sample_channels != 1:
                     raise RuntimeError("Piper returned an unsupported audio format.")
                 samples = self.np.frombuffer(chunk.audio_int16_bytes, dtype="<i2")
                 if not samples.size:
                     continue
-                if sample_rate is not None and chunk.sample_rate != sample_rate:
+                if sample_rate is None:
+                    sample_rate = chunk.sample_rate
+                    frame_size = max(1, sample_rate // 10)
+                    stream = self.sd.OutputStream(
+                        samplerate=sample_rate, channels=1, dtype="int16"
+                    )
+                    stream.__enter__()
+                    if stop_event is not None and stop_event.is_set():
+                        stream.abort()
+                        return
+                    lead_in = self.np.zeros(int(sample_rate * 0.3), dtype="int16")
+                    if stream.write(lead_in.reshape(-1, 1)):
+                        raise RuntimeError(
+                            "Audio output underflowed during the silent lead-in."
+                        )
+                    lead_in_written = True
+                elif chunk.sample_rate != sample_rate:
                     raise RuntimeError("Piper returned inconsistent sample rates.")
-                sample_rate = chunk.sample_rate
-                chunks.append(samples)
-            if not chunks or sample_rate is None:
+                for start in range(0, len(samples), frame_size):
+                    if stop_event is not None and stop_event.is_set():
+                        stream.abort()
+                        return
+                    frame = samples[start:start + frame_size]
+                    if stream.write(frame.reshape(-1, 1)):
+                        raise RuntimeError(
+                            "Audio output underflowed; speech may be incomplete."
+                        )
+            if stream is not None:
+                stream.__exit__(None, None, None)
+            if sample_rate is None:
                 raise RuntimeError("Piper produced no speech audio.")
-            _play_audio(self.np, self.sd, chunks, sample_rate, "int16", stop_event)
         except (*self._piper_errors, self.sd.PortAudioError) as exc:
             raise RuntimeError(f"Piper speech output failed: {exc}") from exc
 
@@ -283,6 +312,9 @@ def _play_audio(np, sd, chunks, sample_rate, dtype, stop_event, level_callback=N
                     raise RuntimeError("Audio output underflowed; speech may be incomplete.")
 
 
+_SENTENCE_SPLIT = re.compile(r"(?<=[.!?…])\s+|(?<=[,;:])\s+")
+
+
 class KokoroSpeaker:
     def __init__(self, model_path: Path, voices_path: Path, voice: str = "af_heart"):
         if not model_path.is_file() or not voices_path.is_file():
@@ -295,6 +327,11 @@ class KokoroSpeaker:
             raise RuntimeError("Kokoro dependencies are missing; install requirements-gui.txt.") from exc
         self.np, self.sd, self.voice = np, sd, voice
         self.level_callback = None
+        self._stream = None
+        self._sample_rate = None
+        self._frame_size = None
+        self._stream_open = False
+        self._buffer = ""
         try:
             self.engine = Kokoro(str(model_path), str(voices_path))
             if voice not in self.engine.get_voices():
@@ -302,15 +339,136 @@ class KokoroSpeaker:
         except (OSError, ValueError, RuntimeError) as exc:
             raise RuntimeError(f"Could not initialize Kokoro voice: {exc}") from exc
 
+    def _ensure_stream(self, sample_rate: int, stop_event=None):
+        if self._stream_open:
+            return
+        self._sample_rate = sample_rate
+        self._frame_size = max(1, sample_rate // 10)
+        self._stream = self.sd.OutputStream(
+            samplerate=sample_rate, channels=1, dtype="float32"
+        )
+        self._stream.__enter__()
+        if stop_event is not None and stop_event.is_set():
+            self._stream.abort()
+            self._stream = None
+            self._stream_open = False
+            return
+        lead_in = self.np.zeros(int(sample_rate * 0.15), dtype="float32")
+        if self._stream.write(lead_in.reshape(-1, 1)):
+            raise RuntimeError("Audio output underflowed during the silent lead-in.")
+        self._stream_open = True
+
+    def _write_frames(self, samples, stop_event=None):
+        assert self._stream is not None and self._stream_open
+        for start in range(0, len(samples), self._frame_size):
+            if stop_event is not None and stop_event.is_set():
+                self._stream.abort()
+                return False
+            frame = samples[start:start + self._frame_size]
+            if self.level_callback is not None:
+                self.level_callback(
+                    min(1.0, float(self.np.sqrt(self.np.mean(frame.astype(self.np.float32) ** 2))) * 5)
+                )
+            if self._stream.write(frame.reshape(-1, 1)):
+                raise RuntimeError("Audio output underflowed; speech may be incomplete.")
+        return True
+
+    def _close_stream(self):
+        if self._stream is not None:
+            try:
+                self._stream.__exit__(None, None, None)
+            finally:
+                self._stream = None
+                self._stream_open = False
+                self._sample_rate = None
+                self._frame_size = None
+
+    def _sentences(self, text: str) -> list[str]:
+        text = text.strip()
+        if not text:
+            return []
+        parts = _SENTENCE_SPLIT.split(text)
+        sentences = []
+        for part in parts:
+            part = part.strip()
+            if part:
+                sentences.append(part)
+        return sentences
+
     def say(self, text: str, stop_event=None) -> None:
+        """Speak the full text, streaming sentences as they are synthesized.
+
+        Keeps a single audio stream open for the entire call so there are no
+        gaps between sentences. The stream is closed when the call returns.
+        """
         if stop_event is not None and stop_event.is_set():
             return
         try:
-            samples, sample_rate = self.engine.create(text, voice=self.voice, lang="en-us")
-            if stop_event is not None and stop_event.is_set():
-                return
-            if not len(samples) or sample_rate <= 0:
-                raise RuntimeError("Kokoro produced no speech audio.")
-            _play_audio(self.np, self.sd, [samples], sample_rate, "float32", stop_event, self.level_callback)
+            self._buffer = ""
+            for chunk in self._sentences(text):
+                if stop_event is not None and stop_event.is_set():
+                    self._close_stream()
+                    return
+                self._speak_chunk(chunk, stop_event)
         except (OSError, ValueError, RuntimeError, self.sd.PortAudioError) as exc:
+            self._close_stream()
             raise RuntimeError(f"Kokoro speech output failed: {exc}") from exc
+        self._close_stream()
+
+    def say_chunk(self, text: str, stop_event=None) -> None:
+        """Feed incremental LLM text; speaks each complete sentence immediately.
+
+        Call repeatedly as Ollama streams tokens, then call :meth:`flush` to
+        speak any remaining partial sentence.
+        """
+        if stop_event is not None and stop_event.is_set():
+            return
+        if not hasattr(self, "_buffer"):
+            self._buffer = ""
+        self._buffer += text
+        while True:
+            sentences = self._sentences(self._buffer)
+            if not sentences:
+                return
+            complete = sentences[:-1]
+            self._buffer = sentences[-1] if sentences[-1] else ""
+            if not complete:
+                return
+            for sentence in complete:
+                if stop_event is not None and stop_event.is_set():
+                    self._close_stream()
+                    return
+                self._speak_chunk(sentence, stop_event)
+
+    def flush(self, stop_event=None) -> None:
+        """Speak any remaining buffered partial sentence and close the stream."""
+        if stop_event is not None and stop_event.is_set():
+            self._close_stream()
+            return
+        try:
+            remaining = getattr(self, "_buffer", "").strip()
+            if remaining:
+                self._speak_chunk(remaining, stop_event)
+            self._buffer = ""
+        except (OSError, ValueError, RuntimeError, self.sd.PortAudioError) as exc:
+            self._close_stream()
+            raise RuntimeError(f"Kokoro speech output failed: {exc}") from exc
+        self._close_stream()
+
+    def _speak_chunk(self, sentence: str, stop_event=None) -> None:
+        sentence = sentence.strip()
+        if not sentence:
+            return
+        samples, sample_rate = self.engine.create(
+            sentence, voice=self.voice, lang="en-us"
+        )
+        if stop_event is not None and stop_event.is_set():
+            self._close_stream()
+            return
+        if not len(samples) or sample_rate <= 0:
+            raise RuntimeError("Kokoro produced no speech audio.")
+        self._ensure_stream(sample_rate, stop_event)
+        if not self._stream_open:
+            return
+        if not self._write_frames(samples, stop_event):
+            self._close_stream()

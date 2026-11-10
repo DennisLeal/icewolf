@@ -358,7 +358,7 @@ def inbox_report(limit: int = 5) -> InboxReport:
             display_name, address = parseaddr(sender)
             spoken_sender = _clean(display_name or address.split("@")[0] or sender, 40)
             spoken.append(f"Number {index} is from {spoken_sender}, about {_clean(subject, 70)}.")
-        spoken.append("Open Gmail tools to review, draft, or organize messages.")
+        spoken.append("Ask me to read or manage an email.")
         return InboxReport("\n".join(lines), " ".join(spoken))
 
 
@@ -462,6 +462,27 @@ def modify_messages(items: list[MailItem], change: LabelChange) -> int:
                     f"Stopped after {completed} of {len(items)} messages. Some changes may already "
                     f"have been applied; check Gmail before retrying. {reason} For access errors, verify Gmail "
                     "API settings and reconnect; for rate limits, wait and retry."
+                ) from exc
+    return completed
+
+
+def trash_messages(items: list[MailItem]) -> int:
+    import httplib2
+    from googleapiclient.errors import HttpError
+    if not items:
+        raise ValueError("No messages were selected for Trash.")
+    completed = 0
+    with gmail_service() as service:
+        for item in items:
+            try:
+                service.users().messages().trash(userId="me", id=item.id).execute()
+                completed += 1
+            except (HttpError, httplib2.HttpLib2Error, OSError) as exc:
+                reason = (f"Gmail returned HTTP {exc.resp.status}." if isinstance(exc, HttpError)
+                          else "A network error occurred.")
+                raise RuntimeError(
+                    f"Trash operation stopped after {completed} of {len(items)} messages. "
+                    f"{reason} Check Gmail Trash before trying again."
                 ) from exc
     return completed
 
